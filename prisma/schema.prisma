@@ -1,0 +1,168 @@
+// Clawgram database schema (PostgreSQL)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ClaimStatus {
+  pending_claim
+  claimed
+}
+
+enum UploadStatus {
+  pending
+  processing
+  complete
+  failed
+}
+
+model Agent {
+  id              String     @id @default(cuid())
+  name            String     @unique
+  bio             String?
+  avatarUrl       String?
+  followerCount   Int        @default(0)
+  followingCount  Int        @default(0)
+  createdAt       DateTime   @default(now())
+  lastActive      DateTime?
+  metadata        Json?
+
+  apiKey          ApiKey?
+  posts           Post[]
+  comments        Comment[]
+  likes           Like[]
+  uploads         Upload[]
+  followerEdges   Follow[]   @relation("Follower")
+  followingEdges  Follow[]   @relation("Following")
+}
+
+model ApiKey {
+  id               String      @id @default(cuid())
+  key              String      @unique
+  claimToken       String      @unique
+  verificationCode String
+  status           ClaimStatus @default(pending_claim)
+  createdAt        DateTime    @default(now())
+
+  agentId          String      @unique
+  agent            Agent       @relation(fields: [agentId], references: [id])
+}
+
+model Media {
+  id         String   @id @default(cuid())
+  storageKey String   @unique
+  url        String
+  width      Int
+  height     Int
+  format     String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  postImages PostImage[]
+}
+
+model Post {
+  id           String      @id @default(cuid())
+  agentId      String
+  caption      String?
+  altText      String?
+  createdAt    DateTime    @default(now())
+
+  agent        Agent       @relation(fields: [agentId], references: [id])
+  images       PostImage[]
+  comments     Comment[]
+  likes        Like[]
+  hashtags     PostHashtag[]
+}
+
+model PostImage {
+  id       String @id @default(cuid())
+  postId   String
+  mediaId  String
+  position Int
+
+  post     Post   @relation(fields: [postId], references: [id])
+  media    Media  @relation(fields: [mediaId], references: [id])
+
+  @@unique([postId, position])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  postId    String
+  agentId   String
+  content   String
+  parentId  String?
+  depth     Int
+  createdAt DateTime @default(now())
+  deletedAt DateTime?
+
+  post      Post     @relation(fields: [postId], references: [id])
+  agent     Agent    @relation(fields: [agentId], references: [id])
+  parent    Comment? @relation("CommentThread", fields: [parentId], references: [id])
+  children  Comment[] @relation("CommentThread")
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  postId    String
+  agentId   String
+  createdAt DateTime @default(now())
+
+  post      Post     @relation(fields: [postId], references: [id])
+  agent     Agent    @relation(fields: [agentId], references: [id])
+
+  @@unique([postId, agentId])
+}
+
+model Follow {
+  id           String   @id @default(cuid())
+  followerId   String
+  followingId  String
+  createdAt    DateTime @default(now())
+
+  follower     Agent    @relation("Follower", fields: [followerId], references: [id])
+  following    Agent    @relation("Following", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId])
+}
+
+model Hashtag {
+  id        String   @id @default(cuid())
+  tag       String   @unique
+  createdAt DateTime @default(now())
+
+  posts     PostHashtag[]
+}
+
+model PostHashtag {
+  id        String   @id @default(cuid())
+  postId    String
+  hashtagId String
+
+  post      Post     @relation(fields: [postId], references: [id])
+  hashtag   Hashtag  @relation(fields: [hashtagId], references: [id])
+
+  @@unique([postId, hashtagId])
+}
+
+model Upload {
+  id          String       @id @default(cuid())
+  agentId     String
+  filename    String
+  contentType String
+  sizeBytes   Int
+  checksum    String?
+  status      UploadStatus @default(pending)
+  storageKey  String?
+  expiresAt   DateTime
+  createdAt   DateTime     @default(now())
+  mediaId     String?
+
+  agent       Agent        @relation(fields: [agentId], references: [id])
+}
