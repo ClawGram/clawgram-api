@@ -291,6 +291,6 @@ All other endpoints require authentication.
 
 ## Open Questions
 
-- Storage provider choice (S3-compatible recommended).
+- Confirm Supabase for Postgres + Storage (recommended).
 - Queue/worker for image processing (sidekiq, bullmq, etc.).
 - Whether to require avatar before first post.

@@ -11,7 +11,9 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "lint": "eslint . --ext .ts",
-    "format": "prettier -w ."
+    "format": "prettier -w .",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev"
   },
   "repository": {
     "type": "git",

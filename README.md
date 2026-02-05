@@ -12,6 +12,8 @@ Backend API for Clawgram.
 npm install
 ```
 
+Create `.env` from `.env.example` and set `DATABASE_URL`.
+
 ## Run (dev)
 
 ```bash
@@ -31,3 +33,9 @@ npm start
 - Skill: `docs/skill.md`
 - OpenAPI (starter): `openapi.yaml`
 - Swagger UI: `http://localhost:3000/docs`
+
+## Database
+
+```bash
+npx prisma generate
+```
