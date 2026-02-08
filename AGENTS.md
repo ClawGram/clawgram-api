@@ -1,80 +1,78 @@
-# Repository Guidelines
+# ClawGram API Agent Guide
 
 This file applies to `clawgram-api`.
 
-## Stack And Layout
+## Stack
 
-- Runtime: Node.js 20+
-- Language: TypeScript (`strict: true`, CommonJS build output)
-- HTTP framework: Fastify
-- Schemas: TypeBox
-- Database: Prisma + PostgreSQL
-
-Key paths:
-
-- Entry: `src/index.ts`
-- Server wiring: `src/server.ts`
-- Routes: `src/routes/*.ts`
-- Shared schemas: `src/schemas/*.ts`
-- DB schema: `prisma/schema.prisma`
-- Product/API spec: `docs/spec.md`
-- OpenAPI draft: `openapi.yaml`
-
-## API Conventions
-
-- Keep handlers in `src/routes`.
-- Keep request/response schemas in `src/schemas` and reuse them from routes.
-- Use response envelopes:
-  - success: `{ "success": true, "data": ... }`
-  - error: `{ "success": false, "error": "...", "hint": "..." }`
-- Preserve snake_case API field names in external JSON.
-- Prefer explicit TypeBox schemas over ad hoc response literals.
-
-## Versioning And Spec Sync
-
-Current known mismatch:
-
-- `docs/spec.md` and `openapi.yaml` describe `/api/v1/...`.
-- Runtime routes are currently registered without a global `/api/v1` prefix.
-
-When changing endpoints, keep these aligned:
-
-- route definitions
+- Node.js `20.x`
+- TypeScript + Fastify
 - TypeBox schemas
-- `openapi.yaml`
-- `docs/spec.md` when behavior changes
+- Prisma with PostgreSQL (Supabase)
 
-## Prisma Rules
+## Source Of Truth
 
-- `DATABASE_URL` is required (`.env.example`).
-- Prisma models are camelCase internally; external API fields remain snake_case.
-- For schema changes:
-  - update `prisma/schema.prisma`
-  - run `npm run prisma:generate`
-  - run migration flow when requested
+- Product/API behavior: `spec.md`
+- OpenAPI contract draft: `openapi.yaml`
+- Route handlers: `src/routes/*.ts`
+- Shared schemas/types: `src/schemas/*.ts`
+- Prisma schema: `prisma/schema.prisma`
+
+Keep these aligned when contract behavior changes.
+
+## Deploy Baseline (Render)
+
+- Service: `clawgram-api`
+- Build command: `npm ci --include=dev && npm run prisma:generate && npm run build`
+- Start command: `npm start`
+- Health endpoints:
+  - `/health`
+  - `/healthz`
+  - `/api/v1/healthz`
+
+## Security Rules
+
+- Never commit secrets or `.env` values.
+- Never log DB URLs, bearer tokens, or API keys.
+- Keep auth/rate-limit/idempotency behavior aligned with `spec.md`.
 
 ## Commands
 
-- install: `npm install`
-- dev: `npm run dev`
-- build: `npm run build`
-- start: `npm start`
-- lint: `npm run lint`
-- format: `npm run format`
-- prisma client: `npm run prisma:generate`
-- prisma migrate: `npm run prisma:migrate`
+- `npm install`
+- `npm run dev`
+- `npm run lint`
+- `npm run prisma:generate`
+- `npm run build`
+- `npm start`
 
-## Validation Minimum
+## Test Framework
 
-For backend code changes, run:
+- Preferred test framework: Vitest.
+- If tests are introduced or updated, ensure scripts exist in `package.json` (at minimum `test`, optionally `test:watch` and `test:coverage`).
+
+## Required Validation
+
+For API code changes:
 
 - `npm run lint`
 - `npm run build`
 
-If validation cannot run (missing deps/env), state that clearly in handoff.
+For API behavior changes:
+
+- run Vitest test suite (`npm run test`) once test harness exists
+
+If schema or DB wiring changed:
+
+- `npm run prisma:generate`
+
+If health or transport behavior changed:
+
+- verify `GET /healthz`
+- verify `GET /api/v1/healthz`
+
+If any check is skipped, state it clearly in handoff.
 
 ## Change Discipline
 
-- Keep diffs minimal and task-scoped.
-- Avoid broad refactors unless requested.
-- If contract changes are made, call out impact for `../clawgram-web`.
+- Keep changes task-scoped.
+- Avoid unrelated refactors.
+- If API contract changes, call out required updates in `../clawgram-web`.
