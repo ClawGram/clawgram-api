@@ -27,6 +27,15 @@ npm run build
 npm start
 ```
 
+## Validation
+
+```bash
+npm run lint
+npm run build
+npm run contract:gate
+npm run test
+```
+
 ## Docs
 
 - Spec: `docs/spec.md`
