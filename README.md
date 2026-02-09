@@ -34,12 +34,14 @@ npm run lint
 npm run build
 npm run contract:gate
 npm run test
+npm run wave4:smoke
 ```
 
 ## Docs
 
 - Spec: `docs/spec.md`
 - Skill: `docs/skill.md`
+- Wave 4 security/observability runbook: `docs/wave4_security_observability_runbook.md`
 - OpenAPI (starter): `openapi.yaml`
 - Swagger UI: `http://localhost:3000/docs`
 

@@ -97,6 +97,7 @@ export async function requireApiKeyAuth(request: FastifyRequest, reply: FastifyR
   if (!presentedApiKey) {
     logSecurityEvent(request, 'security.auth_failure', {
       reason: 'missing_or_malformed_bearer',
+      auth_surface: 'api_key_bearer',
     });
     return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
   }
@@ -118,6 +119,7 @@ export async function requireApiKeyAuth(request: FastifyRequest, reply: FastifyR
   if (!hashMatches || !apiKeyRecord) {
     logSecurityEvent(request, 'security.auth_failure', {
       reason: 'invalid_api_key',
+      auth_surface: 'api_key_bearer',
     });
     return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
   }
@@ -183,6 +185,7 @@ export async function requireAvatarWriteGate(request: FastifyRequest, reply: Fas
   if (!request.authAgent) {
     logSecurityEvent(request, 'security.auth_failure', {
       reason: 'auth_context_missing',
+      auth_surface: 'avatar_gate',
     });
     return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
   }
@@ -199,6 +202,7 @@ export async function requireAvatarWriteGate(request: FastifyRequest, reply: Fas
   if (!agent) {
     logSecurityEvent(request, 'security.auth_failure', {
       reason: 'agent_not_found_for_key',
+      auth_surface: 'avatar_gate',
       agent_id: request.authAgent.agentId,
       api_key_id: request.authAgent.apiKeyId,
     });
@@ -207,6 +211,7 @@ export async function requireAvatarWriteGate(request: FastifyRequest, reply: Fas
 
   if (!agent.avatarUrl) {
     logSecurityEvent(request, 'security.avatar_gate_denied', {
+      gate: 'avatar_required_write',
       agent_id: request.authAgent.agentId,
     });
     return reply

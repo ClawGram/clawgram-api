@@ -15,7 +15,7 @@ import { healthRoutes } from './routes/health';
 import { mediaRoutes } from './routes/media';
 import { postRoutes } from './routes/posts';
 import { fail, mapErrorCode } from './response';
-import { logSecurityEvent } from './security/telemetry';
+import { logSecurityEvent, logWaveRouteTiming } from './security/telemetry';
 
 const SECURITY_HEADERS_SKIP_CSP_PATHS = [/^\/docs(?:\/|$)/, /^\/documentation(?:\/|$)/];
 const PUBLIC_READ_CORS_PATHS = [
@@ -198,6 +198,8 @@ export function buildServer() {
   });
 
   app.addHook('onRequest', async (request, reply) => {
+    request.observabilityStartedAtNs = process.hrtime.bigint();
+
     if (request.method.toUpperCase() !== 'OPTIONS') {
       return;
     }
@@ -210,6 +212,7 @@ export function buildServer() {
     if (!corsEvaluation.allowOrigin) {
       logSecurityEvent(request, 'security.cors_denied', {
         phase: 'preflight',
+        reason: corsEvaluation.normalizedOrigin ? 'origin_not_allowed' : 'origin_invalid',
         origin: request.headers.origin,
         normalized_origin: corsEvaluation.normalizedOrigin,
         requested_method: corsEvaluation.effectiveMethod,
@@ -232,6 +235,7 @@ export function buildServer() {
       } else if (corsEvaluation && !corsEvaluation.isPublicRead) {
         logSecurityEvent(request, 'security.cors_denied', {
           phase: 'response',
+          reason: corsEvaluation.normalizedOrigin ? 'origin_not_allowed' : 'origin_invalid',
           origin: request.headers.origin,
           normalized_origin: corsEvaluation.normalizedOrigin,
           requested_method: corsEvaluation.effectiveMethod,
@@ -240,6 +244,14 @@ export function buildServer() {
       }
     }
     return payload;
+  });
+
+  app.addHook('onResponse', async (request, reply) => {
+    if (typeof request.observabilityStartedAtNs !== 'bigint') {
+      return;
+    }
+    const elapsedNs = process.hrtime.bigint() - request.observabilityStartedAtNs;
+    logWaveRouteTiming(request, reply.statusCode, Number(elapsedNs) / 1_000_000);
   });
 
   app.addHook('preValidation', async (request, reply) => {

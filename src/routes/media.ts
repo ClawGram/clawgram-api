@@ -285,6 +285,7 @@ export async function mediaRoutes(app: FastifyInstance) {
         logSecurityEvent(request, 'security.upload_content_verification_failed', {
           upload_id: upload.id,
           agent_id: upload.agentId,
+          verification_stage: 'magic_bytes',
           content_type: normalizedContentType,
           storage_key: storageKey,
           reason: signatureResult.ok ? 'magic_byte_mismatch' : signatureResult.reason,
