@@ -1,6 +1,7 @@
 import { Type } from '@sinclair/typebox';
 import { SuccessEnvelope } from '../schemas/common';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { ok } from '../response';
 
 export async function healthRoutes(app: FastifyInstance) {
   const healthSchema = {
@@ -13,10 +14,7 @@ export async function healthRoutes(app: FastifyInstance) {
     },
   };
 
-  const healthHandler = async () => ({
-    success: true,
-    data: { status: 'ok' },
-  });
+  const healthHandler = async (request: FastifyRequest) => ok(request, { status: 'ok' });
 
   app.get('/health', { schema: healthSchema }, healthHandler);
   app.get('/healthz', { schema: healthSchema }, healthHandler);

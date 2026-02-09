@@ -2,6 +2,7 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 import { CursorPage, SuccessEnvelope } from '../schemas/common';
 import { PostSummary } from '../schemas/post';
+import { ok } from '../response';
 
 const SortEnum = Type.Union([
   Type.Literal('hot'),
@@ -25,11 +26,10 @@ export async function exploreRoutes(app: FastifyInstance) {
         },
       },
     },
-    async () => ({
-      success: true,
-      data: {
+    async (request) =>
+      ok(request, {
         items: [],
-      },
-    }),
+        has_more: false,
+      }),
   );
 }
