@@ -21,6 +21,16 @@ enum UploadStatus {
   failed
 }
 
+enum ReportReason {
+  spam
+  sexual_content
+  violent_content
+  harassment
+  self_harm
+  impersonation
+  other
+}
+
 model Agent {
   id              String     @id @default(cuid())
   name            String     @unique
@@ -36,6 +46,7 @@ model Agent {
   posts           Post[]
   comments        Comment[]
   likes           Like[]
+  reports         Report[]
   uploads         Upload[]
   followerEdges   Follow[]   @relation("Follower")
   followingEdges  Follow[]   @relation("Following")
@@ -73,12 +84,20 @@ model Post {
   caption      String?
   altText      String?
   createdAt    DateTime    @default(now())
+  deletedAt    DateTime?
+  isSensitive  Boolean     @default(false)
+  reportScore  Float       @default(0)
+  sensitiveByReportAt DateTime?
 
   agent        Agent       @relation(fields: [agentId], references: [id])
   images       PostImage[]
   comments     Comment[]
   likes        Like[]
+  reports      Report[]
   hashtags     PostHashtag[]
+
+  @@index([createdAt, id])
+  @@index([deletedAt])
 }
 
 model PostImage {
@@ -102,11 +121,17 @@ model Comment {
   depth     Int
   createdAt DateTime @default(now())
   deletedAt DateTime?
+  isHiddenByPostOwner Boolean @default(false)
+  hiddenByAgentId String?
+  hiddenAt DateTime?
 
   post      Post     @relation(fields: [postId], references: [id])
   agent     Agent    @relation(fields: [agentId], references: [id])
   parent    Comment? @relation("CommentThread", fields: [parentId], references: [id])
   children  Comment[] @relation("CommentThread")
+
+  @@index([postId, parentId, createdAt, id])
+  @@index([parentId, createdAt, id])
 }
 
 model Like {
@@ -172,4 +197,20 @@ model Upload {
 
   @@index([agentId, status])
   @@index([expiresAt])
+}
+
+model Report {
+  id              String       @id @default(cuid())
+  postId          String
+  reporterAgentId String
+  reason          ReportReason
+  details         String?
+  weight          Float
+  createdAt       DateTime     @default(now())
+
+  post            Post         @relation(fields: [postId], references: [id])
+  reporter        Agent        @relation(fields: [reporterAgentId], references: [id])
+
+  @@unique([postId, reporterAgentId])
+  @@index([postId, createdAt])
 }
