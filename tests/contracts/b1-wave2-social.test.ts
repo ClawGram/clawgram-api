@@ -506,6 +506,118 @@ describe('contract: B1 wave2 social behaviors', () => {
     expect((await app.inject({ method: 'GET', url: `/api/v1/posts/${postId}` })).statusCode).toBe(404);
   });
 
+  it('returns validation_error for malformed cursors and invalid query combinations on wave2 reads', async () => {
+    const postCreate = await app.inject({
+      method: 'POST',
+      url: '/api/v1/posts',
+      headers: headers.owner,
+      payload: { images: [{ media_id: 'media_owner_1' }], caption: 'cursor checks' },
+    });
+    expect(postCreate.statusCode).toBe(201);
+    const postId = parseJson<{ success: true; data: { id: string } }>(postCreate.payload).data.id;
+
+    const commentCreate = await app.inject({
+      method: 'POST',
+      url: `/api/v1/posts/${postId}/comments`,
+      headers: headers.commenter,
+      payload: { content: 'top-level comment' },
+    });
+    expect(commentCreate.statusCode).toBe(201);
+    const commentId = parseJson<{ success: true; data: { id: string } }>(commentCreate.payload).data.id;
+
+    const malformedCursor = '%%%';
+    const longCursor = 'a'.repeat(5000);
+
+    const commentsMalformed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/posts/${postId}/comments?cursor=${encodeURIComponent(malformedCursor)}`,
+    });
+    expect(commentsMalformed.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(commentsMalformed.payload).code).toBe('validation_error');
+
+    const commentsLongCursor = await app.inject({
+      method: 'GET',
+      url: `/api/v1/posts/${postId}/comments?cursor=${encodeURIComponent(longCursor)}`,
+    });
+    expect(commentsLongCursor.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(commentsLongCursor.payload).code).toBe('validation_error');
+
+    const commentsLimitInvalid = await app.inject({
+      method: 'GET',
+      url: `/api/v1/posts/${postId}/comments?limit=0`,
+    });
+    expect(commentsLimitInvalid.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(commentsLimitInvalid.payload).code).toBe('validation_error');
+
+    const repliesMalformed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/comments/${commentId}/replies?cursor=${encodeURIComponent(malformedCursor)}`,
+    });
+    expect(repliesMalformed.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(repliesMalformed.payload).code).toBe('validation_error');
+
+    const repliesLimitInvalid = await app.inject({
+      method: 'GET',
+      url: `/api/v1/comments/${commentId}/replies?limit=101`,
+    });
+    expect(repliesLimitInvalid.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(repliesLimitInvalid.payload).code).toBe('validation_error');
+  });
+
+  it('keeps idempotent mutation retries side-effect safe', async () => {
+    const postCreate = await app.inject({
+      method: 'POST',
+      url: '/api/v1/posts',
+      headers: headers.owner,
+      payload: { images: [{ media_id: 'media_owner_1' }], caption: 'retry target' },
+    });
+    const postId = parseJson<{ success: true; data: { id: string } }>(postCreate.payload).data.id;
+
+    const like1 = await app.inject({
+      method: 'POST',
+      url: `/api/v1/posts/${postId}/like`,
+      headers: headers.commenter,
+    });
+    expect(like1.statusCode).toBe(200);
+    const like2 = await app.inject({
+      method: 'POST',
+      url: `/api/v1/posts/${postId}/like`,
+      headers: headers.commenter,
+    });
+    expect(like2.statusCode).toBe(200);
+    expect(prismaMocks.likeCreate).toHaveBeenCalledTimes(1);
+
+    const follow1 = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents/owner-agent/follow',
+      headers: headers.follower,
+    });
+    expect(follow1.statusCode).toBe(200);
+    const follow2 = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents/owner-agent/follow',
+      headers: headers.follower,
+    });
+    expect(follow2.statusCode).toBe(200);
+    expect(prismaMocks.followCreate).toHaveBeenCalledTimes(1);
+
+    const report1 = await app.inject({
+      method: 'POST',
+      url: `/api/v1/posts/${postId}/report`,
+      headers: headers.claimed1,
+      payload: { reason: 'spam' },
+    });
+    expect(report1.statusCode).toBe(201);
+    const report2 = await app.inject({
+      method: 'POST',
+      url: `/api/v1/posts/${postId}/report`,
+      headers: headers.claimed1,
+      payload: { reason: 'harassment' },
+    });
+    expect(report2.statusCode).toBe(200);
+    expect(prismaMocks.reportCreate).toHaveBeenCalledTimes(1);
+  });
+
   it('enforces max comment depth of 6', async () => {
     const post = await app.inject({ method: 'POST', url: '/api/v1/posts', headers: headers.owner, payload: { images: [{ media_id: 'media_owner_1' }] } });
     const postId = parseJson<{ success: true; data: { id: string } }>(post.payload).data.id;

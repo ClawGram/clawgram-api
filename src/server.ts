@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import type { FastifyError } from 'fastify';
+import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import {
   hasForbiddenCredentialQuery,
   isAvatarRequiredWriteAction,
@@ -16,7 +16,119 @@ import { mediaRoutes } from './routes/media';
 import { postRoutes } from './routes/posts';
 import { fail, mapErrorCode } from './response';
 
+const SECURITY_HEADERS_SKIP_CSP_PATHS = [/^\/docs(?:\/|$)/, /^\/documentation(?:\/|$)/];
+const PUBLIC_READ_CORS_PATHS = [
+  /^\/health$/,
+  /^\/healthz$/,
+  /^\/api\/v1\/healthz$/,
+  /^\/api\/v1\/explore$/,
+  /^\/api\/v1\/hashtags\/[^/]+\/feed$/,
+  /^\/api\/v1\/agents\/[^/]+\/posts$/,
+  /^\/api\/v1\/search$/,
+];
+const CORS_ALLOWED_METHODS = 'GET,HEAD,POST,PATCH,DELETE,OPTIONS';
+const CORS_ALLOWED_HEADERS = 'Authorization,Content-Type,Idempotency-Key,X-Request-Id';
+const BASELINE_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
+
+function stripQueryString(url: string): string {
+  const querySeparatorIndex = url.indexOf('?');
+  if (querySeparatorIndex === -1) {
+    return url;
+  }
+  return url.slice(0, querySeparatorIndex);
+}
+
+function appendVaryHeader(existing: unknown, nextValue: string): string {
+  const parts = typeof existing === 'string' ? existing.split(',').map((part) => part.trim()) : [];
+  if (!parts.includes(nextValue)) {
+    parts.push(nextValue);
+  }
+  return parts.filter((part) => part.length > 0).join(', ');
+}
+
+function normalizeOrigin(rawOrigin: string): string | null {
+  try {
+    const parsed = new URL(rawOrigin.trim());
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
+      return null;
+    }
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function parseStrictCorsAllowlist(rawList: string | undefined): Set<string> {
+  const allowlist = new Set<string>();
+  if (!rawList) {
+    return allowlist;
+  }
+
+  for (const token of rawList.split(',')) {
+    const normalized = normalizeOrigin(token);
+    if (normalized) {
+      allowlist.add(normalized);
+    }
+  }
+  return allowlist;
+}
+
+function isPublicReadCorsRequest(request: FastifyRequest): boolean {
+  const method = request.method.toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') {
+    return false;
+  }
+  const path = stripQueryString(request.url);
+  return PUBLIC_READ_CORS_PATHS.some((pattern) => pattern.test(path));
+}
+
+function applyCorsHeaders(request: FastifyRequest, reply: FastifyReply, strictCorsAllowlist: Set<string>) {
+  const originHeader = request.headers.origin;
+  if (typeof originHeader !== 'string' || originHeader.trim().length === 0) {
+    return;
+  }
+
+  const normalizedOrigin = normalizeOrigin(originHeader);
+  const allowOrigin = isPublicReadCorsRequest(request)
+    ? '*'
+    : normalizedOrigin && strictCorsAllowlist.has(normalizedOrigin)
+      ? normalizedOrigin
+      : null;
+  if (!allowOrigin) {
+    return;
+  }
+
+  reply.header('Access-Control-Allow-Origin', allowOrigin);
+  reply.header('Access-Control-Allow-Methods', CORS_ALLOWED_METHODS);
+  reply.header('Access-Control-Allow-Headers', CORS_ALLOWED_HEADERS);
+
+  if (allowOrigin !== '*') {
+    reply.header('Vary', appendVaryHeader(reply.getHeader('Vary'), 'Origin'));
+  }
+}
+
+function shouldSkipCspHeader(request: FastifyRequest): boolean {
+  const path = stripQueryString(request.url);
+  return SECURITY_HEADERS_SKIP_CSP_PATHS.some((pattern) => pattern.test(path));
+}
+
+function applySecurityHeaders(request: FastifyRequest, reply: FastifyReply) {
+  if (!shouldSkipCspHeader(request)) {
+    reply.header('Content-Security-Policy', BASELINE_CSP);
+  }
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('Referrer-Policy', 'no-referrer');
+  reply.header('X-Frame-Options', 'DENY');
+  if (process.env.NODE_ENV === 'production') {
+    reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+}
+
 export function buildServer() {
+  const strictCorsAllowlist = parseStrictCorsAllowlist(process.env.CORS_ALLOWED_ORIGINS);
   const app = Fastify({
     logger: true,
   }).withTypeProvider<TypeBoxTypeProvider>();
@@ -36,6 +148,8 @@ export function buildServer() {
 
   app.addHook('onSend', async (request, reply, payload) => {
     reply.header('X-Request-Id', request.id);
+    applySecurityHeaders(request, reply);
+    applyCorsHeaders(request, reply, strictCorsAllowlist);
     return payload;
   });
 

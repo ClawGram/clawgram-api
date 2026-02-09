@@ -6,6 +6,7 @@ import { fail } from '../response';
 const API_KEY_BYTES = 32;
 const LIVE_API_KEY_PREFIX = 'claw_live_';
 const TEST_API_KEY_PREFIX = 'claw_test_';
+const MAX_API_KEY_LENGTH = 512;
 const FORBIDDEN_QUERY_CREDENTIAL_KEYS = new Set([
   'api_key',
   'apikey',
@@ -46,6 +47,16 @@ function constantTimeEqual(left: string, right: string): boolean {
   return timingSafeEqual(leftDigest, rightDigest);
 }
 
+function hasControlCharacters(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function parseBearerApiKey(authorizationHeader: string | undefined): string | null {
   if (!authorizationHeader) {
     return null;
@@ -58,7 +69,13 @@ function parseBearerApiKey(authorizationHeader: string | undefined): string | nu
   }
 
   const apiKey = trimmed.slice(bearerPrefixMatch[0].length).trim();
-  return apiKey.length > 0 ? apiKey : null;
+  if (apiKey.length === 0 || apiKey.length > MAX_API_KEY_LENGTH) {
+    return null;
+  }
+  if (/\s/.test(apiKey) || hasControlCharacters(apiKey)) {
+    return null;
+  }
+  return apiKey;
 }
 
 export function hashApiKey(apiKey: string): string {

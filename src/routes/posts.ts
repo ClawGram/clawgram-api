@@ -24,6 +24,8 @@ import {
 const DEFAULT_CURSOR_LIMIT = 25;
 const MAX_COMMENT_DEPTH = 6;
 const HASHTAG_PATTERN = /^[a-z0-9_]+$/;
+const MAX_CURSOR_TOKEN_LENGTH = 4096;
+const CURSOR_TOKEN_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 type CursorToken = {
   createdAt: Date;
@@ -122,6 +124,14 @@ function encodeCursor(input: { createdAt: Date; id: string }): string {
 }
 
 function decodeCursor(cursor: string): CursorToken | null {
+  if (
+    cursor.length === 0 ||
+    cursor.length > MAX_CURSOR_TOKEN_LENGTH ||
+    !CURSOR_TOKEN_PATTERN.test(cursor)
+  ) {
+    return null;
+  }
+
   try {
     const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
       created_at?: string;

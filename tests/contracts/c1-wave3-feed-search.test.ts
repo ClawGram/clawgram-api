@@ -584,4 +584,87 @@ describe('contract: C1 wave3 feed/search surface', () => {
     expect(allBody.data.hashtags.items.length).toBeLessThanOrEqual(1);
     expect(allBody.data.posts.items.length).toBeLessThanOrEqual(2);
   });
+
+  it('returns validation_error for malformed cursors and invalid query combinations on wave3 reads', async () => {
+    const malformedCursor = '%%%';
+    const longCursor = 'a'.repeat(5000);
+
+    const exploreMalformed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/explore?cursor=${encodeURIComponent(malformedCursor)}`,
+    });
+    expect(exploreMalformed.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(exploreMalformed.payload).code).toBe('validation_error');
+
+    const exploreLongCursor = await app.inject({
+      method: 'GET',
+      url: `/api/v1/explore?cursor=${encodeURIComponent(longCursor)}`,
+    });
+    expect(exploreLongCursor.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(exploreLongCursor.payload).code).toBe('validation_error');
+
+    const feedMalformed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/feed?cursor=${encodeURIComponent(malformedCursor)}`,
+      headers: { authorization: 'Bearer claw_test_viewer' },
+    });
+    expect(feedMalformed.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(feedMalformed.payload).code).toBe('validation_error');
+
+    const hashtagMalformed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/hashtags/cats/feed?cursor=${encodeURIComponent(malformedCursor)}`,
+    });
+    expect(hashtagMalformed.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(hashtagMalformed.payload).code).toBe('validation_error');
+
+    const profileMalformed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/agents/alpha/posts?cursor=${encodeURIComponent(malformedCursor)}`,
+    });
+    expect(profileMalformed.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(profileMalformed.payload).code).toBe('validation_error');
+
+    const searchAgentsMalformed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/search?type=agents&q=cat&cursor=${encodeURIComponent(malformedCursor)}`,
+    });
+    expect(searchAgentsMalformed.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(searchAgentsMalformed.payload).code).toBe('validation_error');
+
+    const searchHashtagsMalformed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/search?type=hashtags&q=cat&cursor=${encodeURIComponent(malformedCursor)}`,
+    });
+    expect(searchHashtagsMalformed.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(searchHashtagsMalformed.payload).code).toBe('validation_error');
+
+    const searchPostsMalformed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/search?type=posts&q=cat&cursor=${encodeURIComponent(malformedCursor)}`,
+    });
+    expect(searchPostsMalformed.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(searchPostsMalformed.payload).code).toBe('validation_error');
+
+    const searchAllMalformed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/search?type=all&q=cat&posts_cursor=${encodeURIComponent(malformedCursor)}`,
+    });
+    expect(searchAllMalformed.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(searchAllMalformed.payload).code).toBe('validation_error');
+
+    const searchLimitInvalid = await app.inject({
+      method: 'GET',
+      url: '/api/v1/search?type=posts&q=cat&limit=0',
+    });
+    expect(searchLimitInvalid.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(searchLimitInvalid.payload).code).toBe('validation_error');
+
+    const searchAllLimitInvalid = await app.inject({
+      method: 'GET',
+      url: '/api/v1/search?type=all&q=cat&posts_limit=0',
+    });
+    expect(searchAllLimitInvalid.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(searchAllLimitInvalid.payload).code).toBe('validation_error');
+  });
 });

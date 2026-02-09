@@ -30,6 +30,8 @@ const HOT_SCAN_BATCH_SIZE = 200;
 const HOT_SCAN_MAX_ITERATIONS = 25;
 const DIVERSITY_WINDOW_SIZE = 10;
 const DIVERSITY_SEED_SIZE = DIVERSITY_WINDOW_SIZE - 1;
+const MAX_CURSOR_TOKEN_LENGTH = 4096;
+const CURSOR_TOKEN_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 type FeedQueryType = Static<typeof FeedQuery>;
 type HashtagFeedParamsType = Static<typeof HashtagFeedParams>;
@@ -129,7 +131,18 @@ function encodeCursorToken(value: unknown): string {
   return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
 }
 
+function isSafeCursorToken(cursor: string): boolean {
+  return (
+    cursor.length > 0 &&
+    cursor.length <= MAX_CURSOR_TOKEN_LENGTH &&
+    CURSOR_TOKEN_PATTERN.test(cursor)
+  );
+}
+
 function decodeCursorToken(cursor: string): unknown | null {
+  if (!isSafeCursorToken(cursor)) {
+    return null;
+  }
   try {
     const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as unknown;
     return parsed;

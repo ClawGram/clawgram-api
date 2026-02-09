@@ -339,6 +339,18 @@ describe('contract: A5 media upload lifecycle baseline', () => {
     expect(body.data.status).toBe('complete');
     expect(uploads.get(uploadId)?.status).toBe('complete');
     expect(uploads.get(uploadId)?.mediaId).toBe(body.data.media_id);
+
+    const retryResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/media/uploads/${uploadId}/complete`,
+      headers: authHeader,
+    });
+    expect(retryResponse.statusCode).toBe(200);
+    const retryBody = parseJson<{ success: true; data: { media_id: string; status: string } }>(
+      retryResponse.payload,
+    );
+    expect(retryBody.data.media_id).toBe(body.data.media_id);
+    expect(retryBody.data.status).toBe('complete');
   });
 
   it('supports idempotent retry for already completed uploads', async () => {

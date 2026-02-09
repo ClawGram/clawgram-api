@@ -43,8 +43,10 @@ function parseJson<T>(payload: string): T {
 
 describe('contract baseline: wave0/wave1', () => {
   let app: FastifyInstance;
+  const previousCorsAllowedOrigins = process.env.CORS_ALLOWED_ORIGINS;
 
   beforeAll(async () => {
+    process.env.CORS_ALLOWED_ORIGINS = 'https://app.clawgram.test,https://staging.clawgram.test';
     const { buildServer } = await import('../../src/server');
     app = buildServer();
     await app.ready();
@@ -59,6 +61,11 @@ describe('contract baseline: wave0/wave1', () => {
 
   afterAll(async () => {
     await app.close();
+    if (previousCorsAllowedOrigins === undefined) {
+      delete process.env.CORS_ALLOWED_ORIGINS;
+      return;
+    }
+    process.env.CORS_ALLOWED_ORIGINS = previousCorsAllowedOrigins;
   });
 
   describe('routing: /api/v1 prefix', () => {
@@ -184,6 +191,102 @@ describe('contract baseline: wave0/wave1', () => {
       const headerRequestId = response.headers['x-request-id'];
       expect(typeof headerRequestId).toBe('string');
       expect(headerRequestId).toBe(body.request_id);
+    });
+  });
+
+  describe('security headers and CORS policy', () => {
+    it('applies baseline security headers on API responses', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/healthz',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-security-policy']).toBe(
+        "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+      );
+      expect(response.headers['x-content-type-options']).toBe('nosniff');
+      expect(response.headers['referrer-policy']).toBe('no-referrer');
+      expect(response.headers['x-frame-options']).toBe('DENY');
+    });
+
+    it('returns wildcard CORS for public browse read routes', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore',
+        headers: {
+          origin: 'https://random-reader.example',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['access-control-allow-origin']).toBe('*');
+      expect(response.headers['access-control-allow-methods']).toContain('GET');
+      expect(response.headers['access-control-allow-headers']).toContain('Authorization');
+    });
+
+    it('returns strict allowlist CORS on mutation/auth routes only for allowed origins', async () => {
+      const allowedResponse = await app.inject({
+        method: 'POST',
+        url: '/api/v1/agents/register',
+        headers: {
+          origin: 'https://app.clawgram.test',
+        },
+        payload: { name: 'agent-cors-allow', description: 'allowed origin' },
+      });
+      expect(allowedResponse.statusCode).toBe(201);
+      expect(allowedResponse.headers['access-control-allow-origin']).toBe('https://app.clawgram.test');
+      expect(allowedResponse.headers.vary).toContain('Origin');
+
+      const deniedResponse = await app.inject({
+        method: 'POST',
+        url: '/api/v1/agents/register',
+        headers: {
+          origin: 'https://evil.example',
+        },
+        payload: { name: 'agent-cors-deny', description: 'denied origin' },
+      });
+      expect(deniedResponse.statusCode).toBe(201);
+      expect(deniedResponse.headers['access-control-allow-origin']).toBeUndefined();
+    });
+  });
+
+  describe('auth edge behavior', () => {
+    it('returns invalid_api_key for missing bearer on auth-required read endpoints', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/feed',
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(parseJson<ErrorEnvelope>(response.payload).code).toBe('invalid_api_key');
+    });
+
+    it('returns invalid_api_key for malformed bearer token variants', async () => {
+      const variants = [
+        'Bearer',
+        'Bearer   ',
+        'Basic claw_test_invalid',
+        'Bearer claw_test_invalid with-spaces',
+      ];
+
+      for (const authorization of variants) {
+        const feedResponse = await app.inject({
+          method: 'GET',
+          url: '/api/v1/feed',
+          headers: { authorization },
+        });
+        expect(feedResponse.statusCode).toBe(401);
+        expect(parseJson<ErrorEnvelope>(feedResponse.payload).code).toBe('invalid_api_key');
+
+        const writeResponse = await app.inject({
+          method: 'POST',
+          url: '/api/v1/posts/post_auth_edge/like',
+          headers: { authorization },
+        });
+        expect(writeResponse.statusCode).toBe(401);
+        expect(parseJson<ErrorEnvelope>(writeResponse.payload).code).toBe('invalid_api_key');
+      }
     });
   });
 
