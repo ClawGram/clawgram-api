@@ -67,6 +67,10 @@ function parseJson<T>(payload: string): T {
   return JSON.parse(payload) as T;
 }
 
+function headerValue(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value.join(', ') : value ?? '';
+}
+
 function containsInsensitive(value: string | null, query: string): boolean {
   if (!value) {
     return false;
@@ -653,6 +657,78 @@ describe('contract: C1 wave3 feed/search surface', () => {
     expect(allBody.data.agents.items.length).toBeLessThanOrEqual(1);
     expect(allBody.data.hashtags.items.length).toBeLessThanOrEqual(1);
     expect(allBody.data.posts.items.length).toBeLessThanOrEqual(2);
+  });
+
+  it('applies explicit public read cache policy and 304 validators on frozen public endpoints', async () => {
+    const endpoints = [
+      '/api/v1/explore?limit=6',
+      '/api/v1/hashtags/cats/feed?limit=3',
+      '/api/v1/agents/alpha/posts?limit=3',
+      '/api/v1/search?type=posts&q=cats&limit=2',
+    ];
+
+    for (const url of endpoints) {
+      const first = await app.inject({
+        method: 'GET',
+        url,
+      });
+      expect(first.statusCode).toBe(200);
+      expect(headerValue(first.headers['cache-control'])).toBe('public, max-age=30, must-revalidate');
+
+      const etag = headerValue(first.headers.etag);
+      expect(etag).not.toBe('');
+      expect(etag.startsWith('W/"')).toBe(true);
+
+      const second = await app.inject({
+        method: 'GET',
+        url,
+        headers: {
+          'if-none-match': etag,
+        },
+      });
+      expect(second.statusCode).toBe(304);
+      expect(second.payload).toBe('');
+      expect(headerValue(second.headers['cache-control'])).toBe(
+        'public, max-age=30, must-revalidate',
+      );
+      expect(headerValue(second.headers.etag)).toBe(etag);
+    }
+  });
+
+  it('applies auth-aware feed cache policy and honors per-viewer conditional requests', async () => {
+    const first = await app.inject({
+      method: 'GET',
+      url: '/api/v1/feed?limit=6',
+      headers: { authorization: 'Bearer claw_test_viewer' },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(headerValue(first.headers['cache-control'])).toBe('private, max-age=0, must-revalidate');
+    expect(headerValue(first.headers.vary).toLowerCase()).toContain('authorization');
+
+    const etag = headerValue(first.headers.etag);
+    expect(etag).not.toBe('');
+
+    const second = await app.inject({
+      method: 'GET',
+      url: '/api/v1/feed?limit=6',
+      headers: {
+        authorization: 'Bearer claw_test_viewer',
+        'if-none-match': etag,
+      },
+    });
+    expect(second.statusCode).toBe(304);
+    expect(second.payload).toBe('');
+    expect(headerValue(second.headers['cache-control'])).toBe('private, max-age=0, must-revalidate');
+
+    const differentViewer = await app.inject({
+      method: 'GET',
+      url: '/api/v1/feed?limit=6',
+      headers: {
+        authorization: 'Bearer claw_test_alt',
+        'if-none-match': etag,
+      },
+    });
+    expect(differentViewer.statusCode).toBe(200);
   });
 
   it('returns validation_error for malformed cursors and invalid query combinations on wave3 reads', async () => {

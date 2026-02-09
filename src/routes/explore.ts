@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import type { ClaimStatus, Prisma } from '@prisma/client';
 import { type Static } from '@sinclair/typebox';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { requireApiKeyAuth } from '../auth/api-key';
 import { prisma } from '../db';
 import { fail, ok } from '../response';
@@ -32,6 +33,8 @@ const DIVERSITY_WINDOW_SIZE = 10;
 const DIVERSITY_SEED_SIZE = DIVERSITY_WINDOW_SIZE - 1;
 const MAX_CURSOR_TOKEN_LENGTH = 4096;
 const CURSOR_TOKEN_PATTERN = /^[A-Za-z0-9_-]+$/;
+const CACHE_CONTROL_PUBLIC_READ = 'public, max-age=30, must-revalidate';
+const CACHE_CONTROL_AUTH_READ = 'private, max-age=0, must-revalidate';
 
 type FeedQueryType = Static<typeof FeedQuery>;
 type HashtagFeedParamsType = Static<typeof HashtagFeedParams>;
@@ -138,11 +141,139 @@ type RankedPostEntry = {
   hotScore: number;
 };
 
+type CacheVisibility = 'public' | 'auth';
+
 function toLimit(limit: number | undefined, max: number, fallback: number): number {
   if (!limit || limit < 1) {
     return fallback;
   }
   return Math.min(limit, max);
+}
+
+function stripQueryString(url: string): string {
+  const querySeparatorIndex = url.indexOf('?');
+  return querySeparatorIndex === -1 ? url : url.slice(0, querySeparatorIndex);
+}
+
+function appendVaryHeader(existing: unknown, nextValue: string): string {
+  const parts = typeof existing === 'string' ? existing.split(',').map((part) => part.trim()) : [];
+  if (!parts.includes(nextValue)) {
+    parts.push(nextValue);
+  }
+  return parts.filter((part) => part.length > 0).join(', ');
+}
+
+function normalizeEtagToken(token: string): string | '*' | null {
+  const trimmed = token.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed === '*') {
+    return '*';
+  }
+  const withoutWeakPrefix = trimmed.startsWith('W/') ? trimmed.slice(2).trimStart() : trimmed;
+  if (
+    withoutWeakPrefix.length < 2 ||
+    !withoutWeakPrefix.startsWith('"') ||
+    !withoutWeakPrefix.endsWith('"')
+  ) {
+    return null;
+  }
+  return withoutWeakPrefix.slice(1, -1);
+}
+
+function parseIfNoneMatchHeader(header: string | string[] | undefined): Array<string | '*'> {
+  const joined = Array.isArray(header) ? header.join(',') : header;
+  if (!joined || joined.trim().length === 0) {
+    return [];
+  }
+
+  const tokens: Array<string | '*'> = [];
+  for (const part of joined.split(',')) {
+    const normalized = normalizeEtagToken(part);
+    if (normalized) {
+      tokens.push(normalized);
+    }
+  }
+  return tokens;
+}
+
+function buildWeakEtag(input: unknown): string {
+  const digest = createHash('sha256').update(JSON.stringify(input)).digest('base64url');
+  return `W/"${digest}"`;
+}
+
+function removeCursorFieldsForEtag(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => removeCursorFieldsForEtag(entry));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  const normalized: Record<string, unknown> = {};
+  for (const [key, fieldValue] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'next_cursor') {
+      continue;
+    }
+    normalized[key] = removeCursorFieldsForEtag(fieldValue);
+  }
+  return normalized;
+}
+
+function doesIfNoneMatchHeaderMatch(request: FastifyRequest, currentEtag: string): boolean {
+  const currentToken = normalizeEtagToken(currentEtag);
+  if (!currentToken || currentToken === '*') {
+    return false;
+  }
+
+  const candidates = parseIfNoneMatchHeader(request.headers['if-none-match']);
+  return candidates.includes('*') || candidates.includes(currentToken);
+}
+
+function applyReadCacheHeaders(
+  reply: FastifyReply,
+  options: {
+    visibility: CacheVisibility;
+    etag: string;
+  },
+) {
+  reply.header(
+    'Cache-Control',
+    options.visibility === 'public' ? CACHE_CONTROL_PUBLIC_READ : CACHE_CONTROL_AUTH_READ,
+  );
+  reply.header('ETag', options.etag);
+  if (options.visibility === 'auth') {
+    reply.header('Vary', appendVaryHeader(reply.getHeader('Vary'), 'Authorization'));
+  }
+}
+
+function sendCachedReadResponse<T>(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  options: {
+    visibility: CacheVisibility;
+    data: T;
+    cacheContext?: string;
+  },
+): FastifyReply {
+  const etag = buildWeakEtag({
+    method: request.method.toUpperCase(),
+    path: stripQueryString(request.url),
+    query: request.query,
+    cache_context: options.cacheContext ?? null,
+    data: removeCursorFieldsForEtag(options.data),
+  });
+  applyReadCacheHeaders(reply, {
+    visibility: options.visibility,
+    etag,
+  });
+
+  if (doesIfNoneMatchHeaderMatch(request, etag)) {
+    return reply.code(304).send();
+  }
+
+  return reply.code(200).send(ok(request, options.data));
 }
 
 function encodeCursorToken(value: unknown): string {
@@ -940,10 +1071,13 @@ export async function exploreRoutes(app: FastifyInstance) {
           : undefined;
       const items = await formatRankedEntries(pageEntries);
 
-      return ok(request, {
-        items,
-        has_more: hasMore,
-        next_cursor: nextCursor,
+      return sendCachedReadResponse(request, reply, {
+        visibility: 'public',
+        data: {
+          items,
+          has_more: hasMore,
+          next_cursor: nextCursor,
+        },
       });
     },
   );
@@ -1016,10 +1150,14 @@ export async function exploreRoutes(app: FastifyInstance) {
             : undefined;
         const items = await formatRankedEntries(pageEntries);
 
-        return ok(request, {
-          items,
-          has_more: hasMore,
-          next_cursor: nextCursor,
+        return sendCachedReadResponse(request, reply, {
+          visibility: 'auth',
+          cacheContext: request.authAgent.agentId,
+          data: {
+            items,
+            has_more: hasMore,
+            next_cursor: nextCursor,
+          },
         });
       }
 
@@ -1116,10 +1254,14 @@ export async function exploreRoutes(app: FastifyInstance) {
           : undefined;
       const items = await formatRankedEntries(pageEntries);
 
-      return ok(request, {
-        items,
-        has_more: hasMore,
-        next_cursor: nextCursor,
+      return sendCachedReadResponse(request, reply, {
+        visibility: 'auth',
+        cacheContext: request.authAgent.agentId,
+        data: {
+          items,
+          has_more: hasMore,
+          next_cursor: nextCursor,
+        },
       });
     },
   );
@@ -1159,7 +1301,10 @@ export async function exploreRoutes(app: FastifyInstance) {
         cursor,
       });
 
-      return ok(request, page);
+      return sendCachedReadResponse(request, reply, {
+        visibility: 'public',
+        data: page,
+      });
     },
   );
 
@@ -1205,7 +1350,10 @@ export async function exploreRoutes(app: FastifyInstance) {
         cursor,
       });
 
-      return ok(request, page);
+      return sendCachedReadResponse(request, reply, {
+        visibility: 'public',
+        data: page,
+      });
     },
   );
 
@@ -1241,7 +1389,10 @@ export async function exploreRoutes(app: FastifyInstance) {
           type: 'agents',
           ...page,
         };
-        return ok(request, payload);
+        return sendCachedReadResponse(request, reply, {
+          visibility: 'public',
+          data: payload,
+        });
       }
 
       if (type === 'hashtags') {
@@ -1261,7 +1412,10 @@ export async function exploreRoutes(app: FastifyInstance) {
           type: 'hashtags',
           ...page,
         };
-        return ok(request, payload);
+        return sendCachedReadResponse(request, reply, {
+          visibility: 'public',
+          data: payload,
+        });
       }
 
       if (type === 'posts') {
@@ -1281,7 +1435,10 @@ export async function exploreRoutes(app: FastifyInstance) {
           type: 'posts',
           ...page,
         };
-        return ok(request, payload);
+        return sendCachedReadResponse(request, reply, {
+          visibility: 'public',
+          data: payload,
+        });
       }
 
       const agentsCursor = request.query.agents_cursor
@@ -1324,7 +1481,10 @@ export async function exploreRoutes(app: FastifyInstance) {
         hashtags,
         posts,
       };
-      return ok(request, payload);
+      return sendCachedReadResponse(request, reply, {
+        visibility: 'public',
+        data: payload,
+      });
     },
   );
 }
