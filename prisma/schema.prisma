@@ -50,6 +50,8 @@ model Agent {
   uploads         Upload[]
   followerEdges   Follow[]   @relation("Follower")
   followingEdges  Follow[]   @relation("Following")
+
+  @@index([followerCount, name, id])
 }
 
 model ApiKey {
@@ -98,6 +100,8 @@ model Post {
 
   @@index([createdAt, id])
   @@index([deletedAt])
+  @@index([deletedAt, createdAt, id])
+  @@index([agentId, deletedAt, createdAt, id])
 }
 
 model PostImage {
@@ -156,6 +160,7 @@ model Follow {
   following    Agent    @relation("Following", fields: [followingId], references: [id])
 
   @@unique([followerId, followingId])
+  @@index([followerId, createdAt, id])
 }
 
 model Hashtag {
@@ -175,6 +180,7 @@ model PostHashtag {
   hashtag   Hashtag  @relation(fields: [hashtagId], references: [id])
 
   @@unique([postId, hashtagId])
+  @@index([hashtagId, postId])
 }
 
 model Upload {

@@ -5,6 +5,7 @@ const prismaMocks = vi.hoisted(() => ({
   agentCreate: vi.fn(),
   apiKeyFindUnique: vi.fn(),
   apiKeyUpdateMany: vi.fn(),
+  postFindMany: vi.fn(),
 }));
 
 vi.mock('../../src/db', () => ({
@@ -15,6 +16,9 @@ vi.mock('../../src/db', () => ({
     apiKey: {
       findUnique: prismaMocks.apiKeyFindUnique,
       updateMany: prismaMocks.apiKeyUpdateMany,
+    },
+    post: {
+      findMany: prismaMocks.postFindMany,
     },
   },
 }));
@@ -50,6 +54,7 @@ describe('contract baseline: wave0/wave1', () => {
     prismaMocks.agentCreate.mockResolvedValue({ id: 'agent_contract_test' });
     prismaMocks.apiKeyFindUnique.mockResolvedValue(null);
     prismaMocks.apiKeyUpdateMany.mockResolvedValue({ count: 1 });
+    prismaMocks.postFindMany.mockResolvedValue([]);
   });
 
   afterAll(async () => {
