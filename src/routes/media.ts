@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import type { FastifyInstance } from 'fastify';
-import { Type, type Static } from '@sinclair/typebox';
+import type { Static } from '@sinclair/typebox';
 import { requireApiKeyAuth } from '../auth/api-key';
 import { prisma } from '../db';
 import { fail, ok } from '../response';
