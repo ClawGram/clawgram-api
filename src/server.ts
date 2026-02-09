@@ -15,6 +15,7 @@ import { healthRoutes } from './routes/health';
 import { mediaRoutes } from './routes/media';
 import { postRoutes } from './routes/posts';
 import { fail, mapErrorCode } from './response';
+import { logSecurityEvent } from './security/telemetry';
 
 const SECURITY_HEADERS_SKIP_CSP_PATHS = [/^\/docs(?:\/|$)/, /^\/documentation(?:\/|$)/];
 const PUBLIC_READ_CORS_PATHS = [
@@ -29,6 +30,14 @@ const PUBLIC_READ_CORS_PATHS = [
 const CORS_ALLOWED_METHODS = 'GET,HEAD,POST,PATCH,DELETE,OPTIONS';
 const CORS_ALLOWED_HEADERS = 'Authorization,Content-Type,Idempotency-Key,X-Request-Id';
 const BASELINE_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
+
+type CorsEvaluation = {
+  allowOrigin: string | null;
+  normalizedOrigin: string | null;
+  effectiveMethod: string;
+  isPublicRead: boolean;
+  path: string;
+};
 
 function stripQueryString(url: string): string {
   const querySeparatorIndex = url.indexOf('?');
@@ -76,31 +85,73 @@ function parseStrictCorsAllowlist(rawList: string | undefined): Set<string> {
   return allowlist;
 }
 
-function isPublicReadCorsRequest(request: FastifyRequest): boolean {
+function normalizeMethodToken(rawMethod: string): string | null {
+  const normalized = rawMethod.trim().toUpperCase();
+  if (!/^[A-Z]+$/.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+function getSingleHeaderValue(header: string | string[] | undefined): string | null {
+  if (typeof header === 'string') {
+    return header;
+  }
+  if (Array.isArray(header) && header.length > 0) {
+    const first = header[0];
+    return typeof first === 'string' ? first : null;
+  }
+  return null;
+}
+
+function resolveEffectiveMethod(request: FastifyRequest): string {
   const method = request.method.toUpperCase();
+  if (method !== 'OPTIONS') {
+    return method;
+  }
+
+  const requestedMethod = normalizeMethodToken(
+    getSingleHeaderValue(request.headers['access-control-request-method']) ?? '',
+  );
+  return requestedMethod ?? method;
+}
+
+function isPublicReadCorsRequest(path: string, method: string): boolean {
   if (method !== 'GET' && method !== 'HEAD') {
     return false;
   }
-  const path = stripQueryString(request.url);
   return PUBLIC_READ_CORS_PATHS.some((pattern) => pattern.test(path));
 }
 
-function applyCorsHeaders(request: FastifyRequest, reply: FastifyReply, strictCorsAllowlist: Set<string>) {
+function evaluateCors(
+  request: FastifyRequest,
+  strictCorsAllowlist: Set<string>,
+): CorsEvaluation | null {
   const originHeader = request.headers.origin;
   if (typeof originHeader !== 'string' || originHeader.trim().length === 0) {
-    return;
+    return null;
   }
 
+  const path = stripQueryString(request.url);
+  const effectiveMethod = resolveEffectiveMethod(request);
+  const isPublicRead = isPublicReadCorsRequest(path, effectiveMethod);
   const normalizedOrigin = normalizeOrigin(originHeader);
-  const allowOrigin = isPublicReadCorsRequest(request)
+  const allowOrigin = isPublicRead
     ? '*'
     : normalizedOrigin && strictCorsAllowlist.has(normalizedOrigin)
       ? normalizedOrigin
       : null;
-  if (!allowOrigin) {
-    return;
-  }
 
+  return {
+    allowOrigin,
+    normalizedOrigin,
+    effectiveMethod,
+    isPublicRead,
+    path,
+  };
+}
+
+function applyCorsHeaders(reply: FastifyReply, allowOrigin: string) {
   reply.header('Access-Control-Allow-Origin', allowOrigin);
   reply.header('Access-Control-Allow-Methods', CORS_ALLOWED_METHODS);
   reply.header('Access-Control-Allow-Headers', CORS_ALLOWED_HEADERS);
@@ -146,15 +197,57 @@ export function buildServer() {
     return payload;
   });
 
+  app.addHook('onRequest', async (request, reply) => {
+    if (request.method.toUpperCase() !== 'OPTIONS') {
+      return;
+    }
+
+    const corsEvaluation = evaluateCors(request, strictCorsAllowlist);
+    if (!corsEvaluation) {
+      return reply.code(204).send();
+    }
+
+    if (!corsEvaluation.allowOrigin) {
+      logSecurityEvent(request, 'security.cors_denied', {
+        phase: 'preflight',
+        origin: request.headers.origin,
+        normalized_origin: corsEvaluation.normalizedOrigin,
+        requested_method: corsEvaluation.effectiveMethod,
+        is_public_read_route: corsEvaluation.isPublicRead,
+      });
+      return reply.code(403).send(fail(request, 'CORS origin denied', 'forbidden'));
+    }
+
+    applyCorsHeaders(reply, corsEvaluation.allowOrigin);
+    return reply.code(204).send();
+  });
+
   app.addHook('onSend', async (request, reply, payload) => {
     reply.header('X-Request-Id', request.id);
     applySecurityHeaders(request, reply);
-    applyCorsHeaders(request, reply, strictCorsAllowlist);
+    if (request.method.toUpperCase() !== 'OPTIONS') {
+      const corsEvaluation = evaluateCors(request, strictCorsAllowlist);
+      if (corsEvaluation?.allowOrigin) {
+        applyCorsHeaders(reply, corsEvaluation.allowOrigin);
+      } else if (corsEvaluation && !corsEvaluation.isPublicRead) {
+        logSecurityEvent(request, 'security.cors_denied', {
+          phase: 'response',
+          origin: request.headers.origin,
+          normalized_origin: corsEvaluation.normalizedOrigin,
+          requested_method: corsEvaluation.effectiveMethod,
+          is_public_read_route: corsEvaluation.isPublicRead,
+        });
+      }
+    }
     return payload;
   });
 
   app.addHook('preValidation', async (request, reply) => {
     if (hasForbiddenCredentialQuery(request.query)) {
+      const queryObject = request.query as Record<string, unknown>;
+      logSecurityEvent(request, 'security.query_credential_rejected', {
+        query_keys: Object.keys(queryObject),
+      });
       return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
     }
 

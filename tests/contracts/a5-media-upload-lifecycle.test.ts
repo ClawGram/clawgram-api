@@ -64,6 +64,19 @@ function parseJson<T>(payload: string): T {
   return JSON.parse(payload) as T;
 }
 
+function signatureBytesForContentType(contentType: string): number[] {
+  switch (contentType) {
+    case 'image/png':
+      return [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    case 'image/jpeg':
+      return [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10];
+    case 'image/webp':
+      return [0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50];
+    default:
+      return [];
+  }
+}
+
 function selectProjection<T extends Record<string, unknown>>(
   row: T,
   select?: Record<string, boolean>,
@@ -85,6 +98,8 @@ describe('contract: A5 media upload lifecycle baseline', () => {
   const authHeader = { authorization: 'Bearer claw_test_a5_key' };
   const uploads = new Map<string, UploadRecord>();
   const media = new Map<string, MediaRecord>();
+  const originalFetch = globalThis.fetch;
+  const fetchMock = vi.fn<typeof fetch>();
   let authenticatedAgentId = 'agent_a5';
   let mediaCounter = 0;
 
@@ -98,6 +113,20 @@ describe('contract: A5 media upload lifecycle baseline', () => {
     vi.clearAllMocks();
     uploads.clear();
     media.clear();
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async (input) => {
+      const url = input instanceof URL ? input.toString() : input.toString();
+      const matchedUpload = [...uploads.values()].find(
+        (upload) => upload.storageKey !== null && url.includes(upload.storageKey),
+      );
+      if (!matchedUpload) {
+        return new Response(new Uint8Array(), { status: 404 });
+      }
+      return new Response(Uint8Array.from(signatureBytesForContentType(matchedUpload.contentType)), {
+        status: 206,
+      });
+    });
+    globalThis.fetch = fetchMock;
     authenticatedAgentId = 'agent_a5';
     mediaCounter = 0;
 
@@ -183,6 +212,7 @@ describe('contract: A5 media upload lifecycle baseline', () => {
   });
 
   afterAll(async () => {
+    globalThis.fetch = originalFetch;
     await app.close();
   });
 
@@ -337,6 +367,14 @@ describe('contract: A5 media upload lifecycle baseline', () => {
     const body = parseJson<{ success: true; data: { media_id: string; status: string } }>(response.payload);
     expect(body.data.media_id.startsWith('med_')).toBe(true);
     expect(body.data.status).toBe('complete');
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('agent_a5/upl_complete/complete.webp'),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Range: 'bytes=0-63',
+        }),
+      }),
+    );
     expect(uploads.get(uploadId)?.status).toBe('complete');
     expect(uploads.get(uploadId)?.mediaId).toBe(body.data.media_id);
 
@@ -382,6 +420,42 @@ describe('contract: A5 media upload lifecycle baseline', () => {
     const body = parseJson<{ success: true; data: { media_id: string; status: string } }>(response.payload);
     expect(body.data.media_id).toBe(existingMediaId);
     expect(body.data.status).toBe('complete');
+    expect(prismaMocks.mediaCreate).not.toHaveBeenCalled();
+  });
+
+  it('rejects upload complete when fetched content signature mismatches declared type', async () => {
+    const uploadId = 'upl_mismatch';
+    uploads.set(uploadId, {
+      id: uploadId,
+      agentId: authenticatedAgentId,
+      filename: 'looks-like-png.png',
+      contentType: 'image/png',
+      sizeBytes: 1200,
+      checksum: null,
+      status: 'pending',
+      storageKey: 'agent_a5/upl_mismatch/looks-like-png.png',
+      expiresAt: new Date(Date.now() + 60_000),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      completedAt: null,
+      mediaId: null,
+    });
+    fetchMock.mockResolvedValueOnce(
+      new Response(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]), {
+        status: 206,
+      }),
+    );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/media/uploads/${uploadId}/complete`,
+      headers: authHeader,
+    });
+
+    expect(response.statusCode).toBe(415);
+    expect(parseJson<ErrorEnvelope>(response.payload).code).toBe('unsupported_media_type');
+    expect(uploads.get(uploadId)?.status).toBe('pending');
+    expect(uploads.get(uploadId)?.mediaId).toBeNull();
     expect(prismaMocks.mediaCreate).not.toHaveBeenCalled();
   });
 });

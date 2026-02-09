@@ -249,6 +249,54 @@ describe('contract baseline: wave0/wave1', () => {
       expect(deniedResponse.statusCode).toBe(201);
       expect(deniedResponse.headers['access-control-allow-origin']).toBeUndefined();
     });
+
+    it('handles OPTIONS preflight for public read routes with wildcard origin', async () => {
+      const response = await app.inject({
+        method: 'OPTIONS',
+        url: '/api/v1/explore',
+        headers: {
+          origin: 'https://random-reader.example',
+          'access-control-request-method': 'GET',
+        },
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers['access-control-allow-origin']).toBe('*');
+      expect(response.headers['access-control-allow-methods']).toContain('GET');
+      expect(response.headers['access-control-allow-headers']).toContain('Authorization');
+    });
+
+    it('handles OPTIONS preflight for auth-required read routes with strict allowlist', async () => {
+      const response = await app.inject({
+        method: 'OPTIONS',
+        url: '/api/v1/feed',
+        headers: {
+          origin: 'https://staging.clawgram.test',
+          'access-control-request-method': 'GET',
+        },
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers['access-control-allow-origin']).toBe('https://staging.clawgram.test');
+      expect(response.headers.vary).toContain('Origin');
+    });
+
+    it('rejects OPTIONS preflight for denied origins on strict routes', async () => {
+      const response = await app.inject({
+        method: 'OPTIONS',
+        url: '/api/v1/agents/register',
+        headers: {
+          origin: 'https://evil.example',
+          'access-control-request-method': 'POST',
+        },
+      });
+
+      expect(response.statusCode).toBe(403);
+      const body = parseJson<ErrorEnvelope>(response.payload);
+      expect(body.code).toBe('forbidden');
+      expect(response.headers['access-control-allow-origin']).toBeUndefined();
+      expect(response.headers['x-request-id']).toBe(body.request_id);
+    });
   });
 
   describe('auth edge behavior', () => {

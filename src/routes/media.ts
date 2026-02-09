@@ -4,6 +4,7 @@ import type { Static } from '@sinclair/typebox';
 import { requireApiKeyAuth } from '../auth/api-key';
 import { prisma } from '../db';
 import { fail, ok } from '../response';
+import { logSecurityEvent } from '../security/telemetry';
 import {
   MediaUploadCompleteParams,
   MediaUploadCompleteResponse,
@@ -14,7 +15,12 @@ import { ErrorEnvelope, SuccessEnvelope } from '../schemas/common';
 
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 const UPLOAD_EXPIRY_MS = 60 * 60 * 1000;
+const CONTENT_SIGNATURE_RANGE_BYTES = 64;
 const ALLOWED_UPLOAD_CONTENT_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const PNG_MAGIC_BYTES = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
+const JPEG_MAGIC_BYTES = [0xff, 0xd8, 0xff] as const;
+const WEBP_RIFF_BYTES = [0x52, 0x49, 0x46, 0x46] as const;
+const WEBP_FORMAT_BYTES = [0x57, 0x45, 0x42, 0x50] as const;
 
 type MediaUploadBody = Static<typeof MediaUploadRequest>;
 type MediaUploadCompleteParamsType = Static<typeof MediaUploadCompleteParams>;
@@ -53,6 +59,84 @@ function buildPublicMediaUrl(storageKey: string): string {
 
 function toMediaFormat(contentType: string): string | null {
   return CONTENT_TYPE_TO_FORMAT[contentType] ?? null;
+}
+
+function hasByteSignature(
+  bytes: Uint8Array,
+  expected: readonly number[],
+  offset = 0,
+): boolean {
+  if (bytes.length < offset + expected.length) {
+    return false;
+  }
+  for (let index = 0; index < expected.length; index += 1) {
+    if (bytes[offset + index] !== expected[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function matchesMagicByteSignature(contentType: string, bytes: Uint8Array): boolean {
+  switch (contentType) {
+    case 'image/png':
+      return hasByteSignature(bytes, PNG_MAGIC_BYTES);
+    case 'image/jpeg':
+      return hasByteSignature(bytes, JPEG_MAGIC_BYTES);
+    case 'image/webp':
+      return hasByteSignature(bytes, WEBP_RIFF_BYTES) && hasByteSignature(bytes, WEBP_FORMAT_BYTES, 8);
+    default:
+      return false;
+  }
+}
+
+type SignatureFetchResult =
+  | {
+      ok: true;
+      bytes: Uint8Array;
+    }
+  | {
+      ok: false;
+      reason: string;
+    };
+
+async function fetchUploadSignatureBytes(storageKey: string): Promise<SignatureFetchResult> {
+  const uploadUrl = buildUploadUrl(storageKey);
+
+  let response: Response;
+  try {
+    response = await fetch(uploadUrl, {
+      method: 'GET',
+      headers: {
+        Range: `bytes=0-${CONTENT_SIGNATURE_RANGE_BYTES - 1}`,
+      },
+    });
+  } catch {
+    return {
+      ok: false,
+      reason: 'content_fetch_failed',
+    };
+  }
+
+  if (!(response.status === 200 || response.status === 206)) {
+    return {
+      ok: false,
+      reason: `content_fetch_status_${response.status}`,
+    };
+  }
+
+  const bodyBuffer = new Uint8Array(await response.arrayBuffer());
+  if (bodyBuffer.length === 0) {
+    return {
+      ok: false,
+      reason: 'content_fetch_empty',
+    };
+  }
+
+  return {
+    ok: true,
+    bytes: bodyBuffer.slice(0, CONTENT_SIGNATURE_RANGE_BYTES),
+  };
 }
 
 export async function mediaRoutes(app: FastifyInstance) {
@@ -196,6 +280,18 @@ export async function mediaRoutes(app: FastifyInstance) {
       }
 
       const storageKey = upload.storageKey ?? `${upload.agentId}/${upload.id}/upload.bin`;
+      const signatureResult = await fetchUploadSignatureBytes(storageKey);
+      if (!signatureResult.ok || !matchesMagicByteSignature(normalizedContentType, signatureResult.bytes)) {
+        logSecurityEvent(request, 'security.upload_content_verification_failed', {
+          upload_id: upload.id,
+          agent_id: upload.agentId,
+          content_type: normalizedContentType,
+          storage_key: storageKey,
+          reason: signatureResult.ok ? 'magic_byte_mismatch' : signatureResult.reason,
+        });
+        return reply.code(415).send(fail(request, 'Unsupported media type', 'unsupported_media_type'));
+      }
+
       const mediaId = `med_${randomUUID()}`;
       const media = await prisma.media.create({
         data: {

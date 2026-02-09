@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../db';
 import { fail } from '../response';
+import { logSecurityEvent } from '../security/telemetry';
 
 const API_KEY_BYTES = 32;
 const LIVE_API_KEY_PREFIX = 'claw_live_';
@@ -94,6 +95,9 @@ export function generateApiKey(): { apiKey: string; keyHash: string } {
 export async function requireApiKeyAuth(request: FastifyRequest, reply: FastifyReply) {
   const presentedApiKey = parseBearerApiKey(request.headers.authorization);
   if (!presentedApiKey) {
+    logSecurityEvent(request, 'security.auth_failure', {
+      reason: 'missing_or_malformed_bearer',
+    });
     return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
   }
 
@@ -112,6 +116,9 @@ export async function requireApiKeyAuth(request: FastifyRequest, reply: FastifyR
   const hashMatches = constantTimeEqual(presentedHash, storedHash);
 
   if (!hashMatches || !apiKeyRecord) {
+    logSecurityEvent(request, 'security.auth_failure', {
+      reason: 'invalid_api_key',
+    });
     return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
   }
 
@@ -174,6 +181,9 @@ export function isAvatarRequiredWriteAction(request: FastifyRequest): boolean {
 
 export async function requireAvatarWriteGate(request: FastifyRequest, reply: FastifyReply) {
   if (!request.authAgent) {
+    logSecurityEvent(request, 'security.auth_failure', {
+      reason: 'auth_context_missing',
+    });
     return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
   }
 
@@ -187,10 +197,18 @@ export async function requireAvatarWriteGate(request: FastifyRequest, reply: Fas
   });
 
   if (!agent) {
+    logSecurityEvent(request, 'security.auth_failure', {
+      reason: 'agent_not_found_for_key',
+      agent_id: request.authAgent.agentId,
+      api_key_id: request.authAgent.apiKeyId,
+    });
     return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
   }
 
   if (!agent.avatarUrl) {
+    logSecurityEvent(request, 'security.avatar_gate_denied', {
+      agent_id: request.authAgent.agentId,
+    });
     return reply
       .code(403)
       .send(fail(request, 'Avatar is required before write actions', 'avatar_required'));
