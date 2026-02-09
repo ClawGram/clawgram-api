@@ -116,6 +116,9 @@ function filterPostWhere(post: PostRow, where: any): boolean {
   if (where.agentId?.notIn && where.agentId.notIn.includes(post.agentId)) {
     return false;
   }
+  if (where.id?.in && !where.id.in.includes(post.id)) {
+    return false;
+  }
 
   if (where.createdAt?.lt && !(post.createdAt.getTime() < new Date(where.createdAt.lt).getTime())) {
     return false;
@@ -325,12 +328,44 @@ describe('contract: C1 wave3 feed/search surface', () => {
     );
 
     prismaMocks.postFindMany.mockImplementation(
-      ({ where, orderBy, take }: { where: any; orderBy: Array<any>; take: number }) => {
+      ({
+        where,
+        orderBy,
+        take,
+        include,
+        select,
+      }: {
+        where: any;
+        orderBy?: Array<any>;
+        take?: number;
+        include?: any;
+        select?: any;
+      }) => {
         const filtered = posts.filter((post) => filterPostWhere(post, where));
-        const sorted = [...filtered].sort((left, right) =>
-          compareByOrder(left, right, orderBy[0].createdAt as 'desc' | 'asc'),
-        );
-        const sliced = sorted.slice(0, take);
+        const sorted =
+          Array.isArray(orderBy) && orderBy.length > 0
+            ? [...filtered].sort((left, right) =>
+                compareByOrder(left, right, orderBy[0].createdAt as 'desc' | 'asc'),
+              )
+            : filtered;
+        const sliced = typeof take === 'number' ? sorted.slice(0, take) : sorted;
+
+        if (select && !include) {
+          return sliced.map((post) => ({
+            ...(select.id ? { id: post.id } : {}),
+            ...(select.agentId ? { agentId: post.agentId } : {}),
+            ...(select.createdAt ? { createdAt: post.createdAt } : {}),
+            ...(select._count
+              ? {
+                  _count: {
+                    likes: post.likes,
+                    comments: post.comments,
+                  },
+                }
+              : {}),
+          }));
+        }
+
         return sliced.map((post) => ({
           ...post,
           agent: {
@@ -492,6 +527,41 @@ describe('contract: C1 wave3 feed/search surface', () => {
     );
     expect(noFollowBody.data.items.length).toBeGreaterThan(0);
     expect(noFollowBody.data.has_more).toBe(true);
+  });
+
+  it('keeps feed ordering deterministic across retries and non-overlapping across cursored pages', async () => {
+    const firstPage = await app.inject({
+      method: 'GET',
+      url: '/api/v1/feed?limit=6',
+      headers: { authorization: 'Bearer claw_test_viewer' },
+    });
+    expect(firstPage.statusCode).toBe(200);
+    const firstBody = parseJson<{
+      success: true;
+      data: { items: Array<{ id: string }>; next_cursor?: string; has_more: boolean };
+    }>(firstPage.payload);
+    expect(firstBody.data.items).toHaveLength(6);
+    expect(firstBody.data.has_more).toBe(true);
+    expect(typeof firstBody.data.next_cursor).toBe('string');
+
+    const retryPage = await app.inject({
+      method: 'GET',
+      url: '/api/v1/feed?limit=6',
+      headers: { authorization: 'Bearer claw_test_viewer' },
+    });
+    expect(retryPage.statusCode).toBe(200);
+    const retryBody = parseJson<{ success: true; data: { items: Array<{ id: string }> } }>(retryPage.payload);
+    expect(retryBody.data.items.map((item) => item.id)).toEqual(firstBody.data.items.map((item) => item.id));
+
+    const secondPage = await app.inject({
+      method: 'GET',
+      url: `/api/v1/feed?limit=6&cursor=${encodeURIComponent(firstBody.data.next_cursor ?? '')}`,
+      headers: { authorization: 'Bearer claw_test_viewer' },
+    });
+    expect(secondPage.statusCode).toBe(200);
+    const secondBody = parseJson<{ success: true; data: { items: Array<{ id: string }> } }>(secondPage.payload);
+    const firstIds = new Set(firstBody.data.items.map((item) => item.id));
+    expect(secondBody.data.items.some((item) => firstIds.has(item.id))).toBe(false);
   });
 
   it('supports hashtag feed and profile post grid cursor pagination', async () => {

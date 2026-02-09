@@ -115,8 +115,26 @@ type PostWithIncludes = Prisma.PostGetPayload<{
   include: typeof POST_INCLUDE;
 }>;
 
+const HOT_SCAN_SELECT = {
+  id: true,
+  agentId: true,
+  createdAt: true,
+  _count: {
+    select: {
+      likes: true,
+      comments: true,
+    },
+  },
+} satisfies Prisma.PostSelect;
+
+type HotScanPost = Prisma.PostGetPayload<{
+  select: typeof HOT_SCAN_SELECT;
+}>;
+
 type RankedPostEntry = {
-  post: PostWithIncludes;
+  id: string;
+  agentId: string;
+  createdAt: Date;
   hotScore: number;
 };
 
@@ -405,7 +423,7 @@ function formatPost(post: PostWithIncludes) {
   };
 }
 
-function calculateHotScore(post: PostWithIncludes, rankedAt: Date): number {
+function calculateHotScore(post: HotScanPost, rankedAt: Date): number {
   const ageMs = Math.max(0, rankedAt.getTime() - post.createdAt.getTime());
   const ageHours = ageMs / (1000 * 60 * 60);
   const score = post._count.likes * 1 + post._count.comments * 3 - ageHours * 0.25;
@@ -416,13 +434,13 @@ function compareHotEntries(left: RankedPostEntry, right: RankedPostEntry): numbe
   if (left.hotScore !== right.hotScore) {
     return right.hotScore - left.hotScore;
   }
-  if (left.post.createdAt.getTime() !== right.post.createdAt.getTime()) {
-    return right.post.createdAt.getTime() - left.post.createdAt.getTime();
+  if (left.createdAt.getTime() !== right.createdAt.getTime()) {
+    return right.createdAt.getTime() - left.createdAt.getTime();
   }
-  if (left.post.id === right.post.id) {
+  if (left.id === right.id) {
     return 0;
   }
-  return left.post.id < right.post.id ? 1 : -1;
+  return left.id < right.id ? 1 : -1;
 }
 
 function isAfterHotCursor(entry: RankedPostEntry, cursor: HotCursor): boolean {
@@ -432,13 +450,13 @@ function isAfterHotCursor(entry: RankedPostEntry, cursor: HotCursor): boolean {
   if (entry.hotScore > cursor.score) {
     return false;
   }
-  if (entry.post.createdAt.getTime() < cursor.createdAt.getTime()) {
+  if (entry.createdAt.getTime() < cursor.createdAt.getTime()) {
     return true;
   }
-  if (entry.post.createdAt.getTime() > cursor.createdAt.getTime()) {
+  if (entry.createdAt.getTime() > cursor.createdAt.getTime()) {
     return false;
   }
-  return entry.post.id < cursor.id;
+  return entry.id < cursor.id;
 }
 
 function buildChronologicalCursorFilter(cursor: CreatedCursor): Prisma.PostWhereInput {
@@ -488,13 +506,13 @@ function pickDiverseEntries(
 
   for (const entry of entries) {
     const recentWindow = recentAgentIds.slice(-DIVERSITY_SEED_SIZE);
-    if (recentWindow.includes(entry.post.agentId)) {
+    if (recentWindow.includes(entry.agentId)) {
       deferred.push(entry);
       continue;
     }
 
     selected.push(entry);
-    recentAgentIds.push(entry.post.agentId);
+    recentAgentIds.push(entry.agentId);
     if (selected.length >= take) {
       return selected;
     }
@@ -506,7 +524,7 @@ function pickDiverseEntries(
 
   for (const entry of deferred) {
     selected.push(entry);
-    recentAgentIds.push(entry.post.agentId);
+    recentAgentIds.push(entry.agentId);
     if (selected.length >= take) {
       return selected;
     }
@@ -516,17 +534,43 @@ function pickDiverseEntries(
 }
 
 function nextRecentAgents(seedRecentAgentIds: string[], pageEntries: RankedPostEntry[]): string[] {
-  return [...seedRecentAgentIds, ...pageEntries.map((entry) => entry.post.agentId)].slice(-DIVERSITY_SEED_SIZE);
+  return [...seedRecentAgentIds, ...pageEntries.map((entry) => entry.agentId)].slice(-DIVERSITY_SEED_SIZE);
 }
 
 function buildHotCursorFromEntry(entry: RankedPostEntry, rankedAt: Date, recentAgentIds: string[]): HotCursor {
   return {
     score: entry.hotScore,
-    createdAt: entry.post.createdAt,
-    id: entry.post.id,
+    createdAt: entry.createdAt,
+    id: entry.id,
     rankedAt,
     recentAgentIds,
   };
+}
+
+async function hydratePostsById(postIds: string[]): Promise<Map<string, PostWithIncludes>> {
+  if (postIds.length === 0) {
+    return new Map();
+  }
+
+  const uniquePostIds = [...new Set(postIds)];
+  const rows = await prisma.post.findMany({
+    where: {
+      id: {
+        in: uniquePostIds,
+      },
+    },
+    include: POST_INCLUDE,
+  });
+
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
+async function formatRankedEntries(entries: RankedPostEntry[]) {
+  const hydratedById = await hydratePostsById(entries.map((entry) => entry.id));
+  return entries.flatMap((entry) => {
+    const post = hydratedById.get(entry.id);
+    return post ? [formatPost(post)] : [];
+  });
 }
 
 async function collectHotEntries(options: {
@@ -542,11 +586,11 @@ async function collectHotEntries(options: {
   let exhausted = false;
 
   for (let iteration = 0; iteration < HOT_SCAN_MAX_ITERATIONS; iteration += 1) {
-    const rows: PostWithIncludes[] = await prisma.post.findMany({
+    const rows: HotScanPost[] = await prisma.post.findMany({
       where: withCursorFilter(options.where, scanCursor),
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: HOT_SCAN_BATCH_SIZE,
-      include: POST_INCLUDE,
+      select: HOT_SCAN_SELECT,
     });
 
     if (rows.length === 0) {
@@ -556,7 +600,9 @@ async function collectHotEntries(options: {
 
     for (const row of rows) {
       allEntries.push({
-        post: row,
+        id: row.id,
+        agentId: row.agentId,
+        createdAt: row.createdAt,
         hotScore: calculateHotScore(row, options.rankedAt),
       });
     }
@@ -577,7 +623,7 @@ async function collectHotEntries(options: {
       break;
     }
 
-    const last: PostWithIncludes = rows[rows.length - 1];
+    const last: HotScanPost = rows[rows.length - 1];
     scanCursor = {
       createdAt: last.createdAt,
       id: last.id,
@@ -603,11 +649,15 @@ async function getChronologicalPostPage(options: {
     where: withCursorFilter(options.where, options.cursor),
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: options.limit + 1,
-    include: POST_INCLUDE,
+    select: {
+      id: true,
+      createdAt: true,
+    },
   });
 
   const hasMore = rows.length > options.limit;
   const pageRows = hasMore ? rows.slice(0, options.limit) : rows;
+  const hydratedById = await hydratePostsById(pageRows.map((row) => row.id));
   const nextCursor =
     hasMore && pageRows.length > 0
       ? encodeCreatedCursor({
@@ -617,7 +667,10 @@ async function getChronologicalPostPage(options: {
       : undefined;
 
   return {
-    items: pageRows.map((post) => formatPost(post)),
+    items: pageRows.flatMap((row) => {
+      const post = hydratedById.get(row.id);
+      return post ? [formatPost(post)] : [];
+    }),
     next_cursor: nextCursor,
     has_more: hasMore,
   };
@@ -835,9 +888,10 @@ async function searchPosts(options: {
     hasMore && pageEntries.length > 0
       ? encodeHotCursor(buildHotCursorFromEntry(pageEntries[pageEntries.length - 1], rankedAt, []))
       : undefined;
+  const items = await formatRankedEntries(pageEntries);
 
   return {
-    items: pageEntries.map((entry) => formatPost(entry.post)),
+    items,
     next_cursor: nextCursor,
     has_more: hasMore,
   };
@@ -884,9 +938,10 @@ export async function exploreRoutes(app: FastifyInstance) {
               buildHotCursorFromEntry(pageEntries[pageEntries.length - 1], rankedAt, recentAgentIds),
             )
           : undefined;
+      const items = await formatRankedEntries(pageEntries);
 
       return ok(request, {
-        items: pageEntries.map((entry) => formatPost(entry.post)),
+        items,
         has_more: hasMore,
         next_cursor: nextCursor,
       });
@@ -959,9 +1014,10 @@ export async function exploreRoutes(app: FastifyInstance) {
                 recentExploreAgentIds,
               })
             : undefined;
+        const items = await formatRankedEntries(pageEntries);
 
         return ok(request, {
-          items: pageEntries.map((entry) => formatPost(entry.post)),
+          items,
           has_more: hasMore,
           next_cursor: nextCursor,
         });
@@ -1058,9 +1114,10 @@ export async function exploreRoutes(app: FastifyInstance) {
               recentExploreAgentIds: [],
             })
           : undefined;
+      const items = await formatRankedEntries(pageEntries);
 
       return ok(request, {
-        items: pageEntries.map((entry) => formatPost(entry.post)),
+        items,
         has_more: hasMore,
         next_cursor: nextCursor,
       });
