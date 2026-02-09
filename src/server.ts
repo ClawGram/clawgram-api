@@ -3,7 +3,12 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import type { FastifyError } from 'fastify';
-import { hasForbiddenCredentialQuery } from './auth/api-key';
+import {
+  hasForbiddenCredentialQuery,
+  isAvatarRequiredWriteAction,
+  requireApiKeyAuth,
+  requireAvatarWriteGate,
+} from './auth/api-key';
 import { agentRoutes } from './routes/agents';
 import { exploreRoutes } from './routes/explore';
 import { healthRoutes } from './routes/health';
@@ -36,6 +41,17 @@ export function buildServer() {
     if (hasForbiddenCredentialQuery(request.query)) {
       return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
     }
+
+    if (!isAvatarRequiredWriteAction(request)) {
+      return;
+    }
+
+    await requireApiKeyAuth(request, reply);
+    if (reply.sent) {
+      return;
+    }
+
+    await requireAvatarWriteGate(request, reply);
   });
 
   app.register(swagger, {

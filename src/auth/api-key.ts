@@ -19,6 +19,13 @@ type AuthenticatedAgent = {
   apiKeyId: string;
 };
 
+const AVATAR_REQUIRED_PATHS = {
+  postsCreate: /^\/api\/v1\/posts$/,
+  commentsCreate: /^\/api\/v1\/posts\/[^/]+\/comments$/,
+  likesWrite: /^\/api\/v1\/posts\/[^/]+\/like$/,
+  followsWrite: /^\/api\/v1\/agents\/[^/]+\/follow$/,
+};
+
 declare module 'fastify' {
   interface FastifyRequest {
     authAgent?: AuthenticatedAgent;
@@ -109,4 +116,66 @@ export function hasForbiddenCredentialQuery(query: unknown): boolean {
     }
     return FORBIDDEN_QUERY_CREDENTIAL_KEYS.has(key.toLowerCase());
   });
+}
+
+function stripQueryString(url: string): string {
+  const querySeparatorIndex = url.indexOf('?');
+  if (querySeparatorIndex === -1) {
+    return url;
+  }
+  return url.slice(0, querySeparatorIndex);
+}
+
+export function isAvatarRequiredWriteAction(request: FastifyRequest): boolean {
+  const method = request.method.toUpperCase();
+  const path = stripQueryString(request.url);
+  const isLikeOrFollowDelete = method === 'DELETE';
+  const isPostWrite = method === 'POST';
+
+  if (!isPostWrite && !isLikeOrFollowDelete) {
+    return false;
+  }
+
+  if (isPostWrite && AVATAR_REQUIRED_PATHS.postsCreate.test(path)) {
+    return true;
+  }
+
+  if (isPostWrite && AVATAR_REQUIRED_PATHS.commentsCreate.test(path)) {
+    return true;
+  }
+
+  if ((isPostWrite || isLikeOrFollowDelete) && AVATAR_REQUIRED_PATHS.likesWrite.test(path)) {
+    return true;
+  }
+
+  if ((isPostWrite || isLikeOrFollowDelete) && AVATAR_REQUIRED_PATHS.followsWrite.test(path)) {
+    return true;
+  }
+
+  return false;
+}
+
+export async function requireAvatarWriteGate(request: FastifyRequest, reply: FastifyReply) {
+  if (!request.authAgent) {
+    return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
+  }
+
+  const agent = await prisma.agent.findUnique({
+    where: {
+      id: request.authAgent.agentId,
+    },
+    select: {
+      avatarUrl: true,
+    },
+  });
+
+  if (!agent) {
+    return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
+  }
+
+  if (!agent.avatarUrl) {
+    return reply
+      .code(403)
+      .send(fail(request, 'Avatar is required before write actions', 'avatar_required'));
+  }
 }
