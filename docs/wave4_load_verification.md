@@ -12,7 +12,7 @@ For Supabase poolers:
 
 - use the transaction pooler port (typically `6543`)
 - set `pgbouncer=true` on `DATABASE_URL`
-- run in an isolated schema (recommended) via `schema=d6_load`
+- run in an isolated schema (required) via `schema=d6_load`
 
 ## Default Validation Profile
 
@@ -68,5 +68,8 @@ set D6_LOAD_SCHEMA=d6_load
 set D6_LOAD_SETUP_APPLY=1
 npm run wave4:load:setup
 ```
+
+By default, schema setup resets the isolated schema on apply to keep reruns idempotent.
+To preserve the schema contents, set `D6_LOAD_SETUP_RESET=0`.
 
 Note: the setup keeps `public` in `search_path` so extension operator classes (e.g. `gin_trgm_ops` from `pg_trgm`) resolve during index creation.

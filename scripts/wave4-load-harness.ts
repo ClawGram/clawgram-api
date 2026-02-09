@@ -149,6 +149,7 @@ const SKIP_WARMUP = process.env.D6_LOAD_SKIP_WARMUP === '1';
 const SEED_BATCH_SIZE = 1000;
 const BASE_TIMESTAMP = Date.parse('2026-02-09T00:00:00.000Z');
 const LOG_INTERVAL_MS = 5000;
+const LOAD_SCHEMA = process.env.D6_LOAD_SCHEMA ?? '';
 
 function toPositiveInt(rawValue: string | undefined, fallback: number): number {
   if (!rawValue) {
@@ -159,6 +160,35 @@ function toPositiveInt(rawValue: string | undefined, fallback: number): number {
     return fallback;
   }
   return Math.floor(parsed);
+}
+
+function requireDatabaseUrlSchema(): string {
+  const raw = process.env.DATABASE_URL;
+  if (!raw) {
+    throw new Error('DATABASE_URL is required for wave4 load harness');
+  }
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('DATABASE_URL must be a valid postgres connection string URL');
+  }
+
+  const schemaParam = url.searchParams.get('schema')?.trim() ?? '';
+  if (!schemaParam) {
+    throw new Error(
+      'DATABASE_URL must include ?schema=<isolated_schema> (required for safe TRUNCATE and isolation)',
+    );
+  }
+  if (schemaParam === 'public') {
+    throw new Error('DATABASE_URL schema=public is not allowed for wave4 load runs; use an isolated schema.');
+  }
+  if (LOAD_SCHEMA && schemaParam !== LOAD_SCHEMA) {
+    throw new Error(`DATABASE_URL schema="${schemaParam}" must match D6_LOAD_SCHEMA="${LOAD_SCHEMA}".`);
+  }
+
+  return schemaParam;
 }
 
 function logStage(stage: string, details?: Record<string, unknown>) {
@@ -824,13 +854,12 @@ async function writeSummaryArtifact(
 }
 
 async function run() {
-  if (!process.env.DATABASE_URL) {
-    throw new Error('DATABASE_URL is required for wave4 load harness');
-  }
+  const schemaParam = requireDatabaseUrlSchema();
 
   const config = DEFAULT_CONFIG;
   logStage('run.start', {
     profile: config.profile,
+    database_schema: schemaParam,
     duration_seconds: config.durationSeconds,
     public_read_rps: config.publicReadRps,
     write_rps: config.writeRps,

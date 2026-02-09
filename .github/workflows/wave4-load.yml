@@ -71,6 +71,7 @@ jobs:
           D6_LOAD_SCHEMA: ${{ inputs.load_schema }}
           D6_LOAD_OUTPUT_DIR: artifacts/wave4-load
           D6_LOAD_SETUP_APPLY: "1"
+          D6_LOAD_SETUP_RESET: "1"
         run: npm run wave4:load:setup
 
       - name: Run Wave 4 Load Harness (15 min)
