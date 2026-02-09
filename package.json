@@ -13,6 +13,8 @@
     "lint": "eslint . --ext .ts",
     "contract:gate": "tsx scripts/contract-drift-gate.ts",
     "wave4:smoke": "tsx scripts/wave4-smoke-harness.ts",
+    "wave4:load:setup": "tsx scripts/wave4-load-setup-schema.ts",
+    "wave4:load": "tsx scripts/wave4-load-harness.ts",
     "format": "prettier -w .",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

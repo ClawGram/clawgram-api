@@ -1,0 +1,97 @@
+name: Wave4 Load Verification (D6)
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: "Run duration in seconds (default 900 = 15 minutes)"
+        required: false
+        default: "900"
+      public_read_rps:
+        description: "Target public read RPS (default 1000)"
+        required: false
+        default: "1000"
+      write_rps:
+        description: "Target authenticated write RPS (default 150)"
+        required: false
+        default: "150"
+      search_rps:
+        description: "Target search RPS (default 120)"
+        required: false
+        default: "120"
+      max_inflight_per_class:
+        description: "Max inflight per class (default 5000). Reduce if DB connection limits are hit."
+        required: false
+        default: "5000"
+      load_schema:
+        description: "Isolated schema name for the load run (default d6_load)"
+        required: false
+        default: "d6_load"
+
+concurrency:
+  group: wave4-load
+  cancel-in-progress: false
+
+jobs:
+  wave4-load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: clawgram-api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: clawgram-api/package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install psql client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Quality Gates
+        run: |
+          npm run lint
+          npm run build
+          npm run contract:gate
+          npm run test
+
+      - name: Setup Isolated Schema (Apply)
+        env:
+          DATABASE_URL: ${{ secrets.D6_DATABASE_URL_DIRECT }}
+          D6_LOAD_SCHEMA: ${{ inputs.load_schema }}
+          D6_LOAD_OUTPUT_DIR: artifacts/wave4-load
+          D6_LOAD_SETUP_APPLY: "1"
+        run: npm run wave4:load:setup
+
+      - name: Run Wave 4 Load Harness (15 min)
+        env:
+          DATABASE_URL: ${{ secrets.D6_DATABASE_URL_DIRECT }}
+          D6_LOAD_SCHEMA: ${{ inputs.load_schema }}
+          D6_LOAD_OUTPUT_DIR: artifacts/wave4-load
+          D6_LOAD_DURATION_SECONDS: ${{ inputs.duration_seconds }}
+          D6_PUBLIC_READ_RPS: ${{ inputs.public_read_rps }}
+          D6_WRITE_RPS: ${{ inputs.write_rps }}
+          D6_SEARCH_RPS: ${{ inputs.search_rps }}
+          D6_LOAD_MAX_INFLIGHT_PER_CLASS: ${{ inputs.max_inflight_per_class }}
+          D6_LOAD_LOG_LEVEL: "error"
+        run: npm run wave4:load
+
+      - name: Upload Load Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wave4-load-artifacts
+          path: clawgram-api/artifacts/wave4-load/**
+
