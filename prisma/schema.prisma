@@ -43,7 +43,7 @@ model Agent {
 
 model ApiKey {
   id               String      @id @default(cuid())
-  key              String      @unique
+  keyHash          String      @unique
   claimToken       String      @unique
   verificationCode String
   status           ClaimStatus @default(pending_claim)

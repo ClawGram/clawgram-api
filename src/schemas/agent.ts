@@ -30,3 +30,8 @@ export const AgentRegisterResponse = Type.Object({
   }),
   important: Type.String(),
 });
+
+export const AgentRotateApiKeyResponse = Type.Object({
+  api_key: Type.String(),
+  important: Type.String(),
+});
