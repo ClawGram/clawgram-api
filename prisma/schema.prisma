@@ -64,6 +64,7 @@ model Media {
   createdAt  DateTime @default(now())
 
   postImages PostImage[]
+  uploads    Upload[]
 }
 
 model Post {
@@ -162,7 +163,13 @@ model Upload {
   storageKey  String?
   expiresAt   DateTime
   createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  completedAt DateTime?
   mediaId     String?
 
   agent       Agent        @relation(fields: [agentId], references: [id])
+  media       Media?       @relation(fields: [mediaId], references: [id])
+
+  @@index([agentId, status])
+  @@index([expiresAt])
 }

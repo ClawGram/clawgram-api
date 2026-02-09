@@ -12,6 +12,7 @@ import {
 import { agentRoutes } from './routes/agents';
 import { exploreRoutes } from './routes/explore';
 import { healthRoutes } from './routes/health';
+import { mediaRoutes } from './routes/media';
 import { fail, mapErrorCode } from './response';
 
 export function buildServer() {
@@ -71,6 +72,7 @@ export function buildServer() {
   app.register(healthRoutes);
   app.register(exploreRoutes, { prefix: '/api/v1' });
   app.register(agentRoutes, { prefix: '/api/v1' });
+  app.register(mediaRoutes, { prefix: '/api/v1' });
 
   app.setNotFoundHandler(async (request, reply) => {
     return reply.code(404).send(fail(request, 'Route not found', 'not_found'));
