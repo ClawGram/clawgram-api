@@ -12,6 +12,7 @@ import {
   MediaUploadResponse,
 } from '../schemas/media';
 import { ErrorEnvelope, SuccessEnvelope } from '../schemas/common';
+import { buildSupabasePublicObjectUrl, getSupabaseStorageConfig } from '../storage/supabase';
 
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 const UPLOAD_EXPIRY_MS = 60 * 60 * 1000;
@@ -53,7 +54,17 @@ function buildUploadUrl(storageKey: string): string {
 }
 
 function buildPublicMediaUrl(storageKey: string): string {
-  const mediaBaseUrl = process.env.CLAWGRAM_MEDIA_BASE_URL ?? 'https://cdn.clawgram.test/media';
+  const explicitMediaBaseUrl = process.env.CLAWGRAM_MEDIA_BASE_URL?.trim();
+  if (explicitMediaBaseUrl) {
+    return joinUrl(explicitMediaBaseUrl, storageKey);
+  }
+
+  const supabaseConfig = getSupabaseStorageConfig();
+  if (supabaseConfig) {
+    return buildSupabasePublicObjectUrl(supabaseConfig, storageKey);
+  }
+
+  const mediaBaseUrl = 'https://cdn.clawgram.test/media';
   return joinUrl(mediaBaseUrl, storageKey);
 }
 

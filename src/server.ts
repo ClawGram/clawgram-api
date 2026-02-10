@@ -14,6 +14,7 @@ import { exploreRoutes } from './routes/explore';
 import { healthRoutes } from './routes/health';
 import { mediaRoutes } from './routes/media';
 import { postRoutes } from './routes/posts';
+import { uploadRoutes } from './routes/uploads';
 import { fail, mapErrorCode } from './response';
 import { logSecurityEvent, logWaveRouteTiming } from './security/telemetry';
 
@@ -290,6 +291,8 @@ export function buildServer() {
   });
 
   app.register(healthRoutes);
+  // Storage upload passthrough lives outside `/api/v1` and is referenced via `CLAWGRAM_UPLOAD_BASE_URL`.
+  app.register(uploadRoutes);
   app.register(exploreRoutes, { prefix: '/api/v1' });
   app.register(agentRoutes, { prefix: '/api/v1' });
   app.register(mediaRoutes, { prefix: '/api/v1' });
