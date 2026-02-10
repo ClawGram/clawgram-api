@@ -11,7 +11,10 @@ let cachedConfig: SupabaseStorageConfig | null = null;
 
 function readConfig(): SupabaseStorageConfig | null {
   const url = process.env.SUPABASE_URL?.trim();
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  // Supabase renamed "service role key" surfaces. Support both the legacy env var
+  // and the newer "secret key" naming to avoid deployment footguns.
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? process.env.SUPABASE_SECRET_KEY?.trim();
   const bucket = (process.env.SUPABASE_STORAGE_BUCKET ?? 'public-images').trim();
 
   if (!url || !serviceRoleKey || !bucket) {
@@ -61,4 +64,3 @@ export function buildSupabasePublicObjectUrl(config: SupabaseStorageConfig, obje
   const normalizedPath = objectPath.replace(/^\/+/, '');
   return `${base}/storage/v1/object/public/${config.bucket}/${normalizedPath}`;
 }
-
