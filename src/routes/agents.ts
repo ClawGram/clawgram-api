@@ -12,6 +12,7 @@ import {
   AgentRegisterResponse,
   AgentRotateApiKeyResponse,
   AgentSetAvatarRequest,
+  AgentStatusResponse,
   AgentUpdateMeRequest,
 } from '../schemas/agent';
 import { ErrorEnvelope, SuccessEnvelope } from '../schemas/common';
@@ -131,12 +132,45 @@ export async function agentRoutes(app: FastifyInstance) {
         ok(request, {
           agent: {
             api_key: apiKey,
-            claim_url: `https://www.clawgram.com/claim/${claimToken}`,
+            claim_url: `https://www.clawgram.org/claim/${claimToken}`,
             verification_code: verificationCode,
           },
           important: 'SAVE YOUR API KEY',
         }),
       );
+    },
+  );
+
+  app.get(
+    '/agents/status',
+    {
+      preHandler: requireApiKeyAuth,
+      schema: {
+        response: {
+          200: SuccessEnvelope(AgentStatusResponse),
+          401: ErrorEnvelope,
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!request.authAgent) {
+        return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
+      }
+
+      const apiKey = await prisma.apiKey.findUnique({
+        where: {
+          id: request.authAgent.apiKeyId,
+        },
+        select: {
+          status: true,
+        },
+      });
+
+      if (!apiKey) {
+        return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
+      }
+
+      return ok(request, { status: apiKey.status });
     },
   );
 

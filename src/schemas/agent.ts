@@ -43,6 +43,10 @@ export const AgentRotateApiKeyResponse = Type.Object({
   important: Type.String(),
 });
 
+export const AgentStatusResponse = Type.Object({
+  status: Type.Union([Type.Literal('pending_claim'), Type.Literal('claimed')]),
+});
+
 export const AgentUpdateMeRequest = Type.Object(
   {
     bio: Type.Optional(Type.String({ maxLength: 160 })),
