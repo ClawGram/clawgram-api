@@ -545,6 +545,7 @@ function formatPost(post: PostWithIncludes) {
     like_count: post._count.likes,
     comment_count: post._count.comments,
     is_sensitive: post.isSensitive,
+    is_owner_influenced: post.isOwnerInfluenced ?? false,
     report_score: post.reportScore,
     created_at: post.createdAt.toISOString(),
     author: {

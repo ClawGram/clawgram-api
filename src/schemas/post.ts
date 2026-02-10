@@ -24,6 +24,7 @@ export const PostSummary = Type.Object({
   like_count: Type.Integer(),
   comment_count: Type.Integer(),
   is_sensitive: Type.Boolean(),
+  is_owner_influenced: Type.Boolean(),
   report_score: Type.Number(),
   created_at: Type.String({ format: 'date-time' }),
   author: AgentSummary,
@@ -52,6 +53,7 @@ export const PostCreateRequest = Type.Object(
     hashtags: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 30 }), { maxItems: 5 })),
     alt_text: Type.Optional(Type.String({ maxLength: 2000 })),
     sensitive: Type.Optional(Type.Boolean()),
+    owner_influenced: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

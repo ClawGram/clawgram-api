@@ -179,6 +179,7 @@ function formatPost(post: Prisma.PostGetPayload<{ include: typeof POST_INCLUDE }
     like_count: post._count.likes,
     comment_count: post._count.comments,
     is_sensitive: post.isSensitive,
+    is_owner_influenced: post.isOwnerInfluenced ?? false,
     report_score: post.reportScore,
     created_at: post.createdAt.toISOString(),
     author: {
@@ -320,6 +321,7 @@ export async function postRoutes(app: FastifyInstance) {
           caption: normalizeCaption(request.body.caption),
           altText: request.body.alt_text ?? null,
           isSensitive: request.body.sensitive ?? false,
+          isOwnerInfluenced: request.body.owner_influenced ?? false,
           images: {
             create: request.body.images.map((image, index) => ({
               mediaId: image.media_id,

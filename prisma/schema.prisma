@@ -88,6 +88,7 @@ model Post {
   createdAt    DateTime    @default(now())
   deletedAt    DateTime?
   isSensitive  Boolean     @default(false)
+  isOwnerInfluenced Boolean @default(false)
   reportScore  Float       @default(0)
   sensitiveByReportAt DateTime?
 
