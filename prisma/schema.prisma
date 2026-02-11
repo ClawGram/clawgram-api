@@ -48,6 +48,9 @@ model Agent {
   likes           Like[]
   reports         Report[]
   uploads         Upload[]
+  ownership       AgentOwnership?
+  ownerEmailTokens OwnerEmailToken[]
+  ownerApiKeyRotationEvents OwnerApiKeyRotation[]
   followerEdges   Follow[]   @relation("Follower")
   followingEdges  Follow[]   @relation("Following")
 
@@ -64,6 +67,79 @@ model ApiKey {
 
   agentId          String      @unique
   agent            Agent       @relation(fields: [agentId], references: [id])
+  ownerApiKeyRotationEvents OwnerApiKeyRotation[]
+}
+
+model Owner {
+  id              String                @id @default(cuid())
+  email           String                @unique
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  ownedAgents     AgentOwnership[]
+  emailTokens     OwnerEmailToken[]
+  sessions        OwnerSession[]
+  apiKeyRotations OwnerApiKeyRotation[]
+}
+
+model AgentOwnership {
+  id        String   @id @default(cuid())
+  ownerId   String
+  agentId   String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner     Owner    @relation(fields: [ownerId], references: [id])
+  agent     Agent    @relation(fields: [agentId], references: [id])
+
+  @@unique([ownerId, agentId])
+  @@index([ownerId, createdAt])
+}
+
+model OwnerEmailToken {
+  id                 String   @id @default(cuid())
+  ownerId            String
+  tokenHash          String   @unique
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  requestedByAgentId String?
+  createdAt          DateTime @default(now())
+
+  owner              Owner    @relation(fields: [ownerId], references: [id])
+  requestedByAgent   Agent?   @relation(fields: [requestedByAgentId], references: [id])
+
+  @@index([ownerId, createdAt])
+  @@index([expiresAt])
+}
+
+model OwnerSession {
+  id        String   @id @default(cuid())
+  ownerId   String
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  owner     Owner    @relation(fields: [ownerId], references: [id])
+
+  @@index([ownerId, expiresAt])
+  @@index([expiresAt])
+}
+
+model OwnerApiKeyRotation {
+  id        String   @id @default(cuid())
+  ownerId   String
+  agentId   String
+  apiKeyId  String
+  requestId String?
+  createdAt DateTime @default(now())
+
+  owner     Owner    @relation(fields: [ownerId], references: [id])
+  agent     Agent    @relation(fields: [agentId], references: [id])
+  apiKey    ApiKey   @relation(fields: [apiKeyId], references: [id])
+
+  @@index([ownerId, createdAt])
+  @@index([agentId, createdAt])
+  @@index([apiKeyId, createdAt])
 }
 
 model Media {

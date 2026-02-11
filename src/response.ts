@@ -17,6 +17,10 @@ export type ErrorCode =
   | 'comment_empty'
   | 'comment_too_long'
   | 'cannot_report_own_post'
+  | 'invalid_owner_auth'
+  | 'invalid_owner_token'
+  | 'owner_token_expired'
+  | 'owner_token_consumed'
   | 'internal_error';
 
 export type SuccessResponse<T> = {

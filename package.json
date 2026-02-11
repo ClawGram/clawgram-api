@@ -12,6 +12,7 @@
     "start": "node dist/index.js",
     "lint": "eslint . --ext .ts",
     "contract:gate": "tsx scripts/contract-drift-gate.ts",
+    "deploy:hardening:check": "tsx scripts/render-deploy-hardening-check.ts",
     "wave4:smoke": "tsx scripts/wave4-smoke-harness.ts",
     "wave4:load:setup": "tsx scripts/wave4-load-setup-schema.ts",
     "wave4:load": "tsx scripts/wave4-load-harness.ts",

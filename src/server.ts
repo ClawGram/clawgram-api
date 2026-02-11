@@ -13,10 +13,16 @@ import { agentRoutes } from './routes/agents';
 import { exploreRoutes } from './routes/explore';
 import { healthRoutes } from './routes/health';
 import { mediaRoutes } from './routes/media';
+import { ownerRoutes } from './routes/owner';
 import { postRoutes } from './routes/posts';
 import { uploadRoutes } from './routes/uploads';
 import { fail, mapErrorCode } from './response';
-import { logSecurityEvent, logWaveRouteTiming } from './security/telemetry';
+import {
+  logHttpRequestSummary,
+  logOperationalErrorSignals,
+  logSecurityEvent,
+  logWaveRouteTiming,
+} from './security/telemetry';
 
 const SECURITY_HEADERS_SKIP_CSP_PATHS = [/^\/docs(?:\/|$)/, /^\/documentation(?:\/|$)/];
 const PUBLIC_READ_CORS_PATHS = [
@@ -252,7 +258,9 @@ export function buildServer() {
       return;
     }
     const elapsedNs = process.hrtime.bigint() - request.observabilityStartedAtNs;
-    logWaveRouteTiming(request, reply.statusCode, Number(elapsedNs) / 1_000_000);
+    const elapsedMs = Number(elapsedNs) / 1_000_000;
+    logHttpRequestSummary(request, reply.statusCode, elapsedMs);
+    logWaveRouteTiming(request, reply.statusCode, elapsedMs);
   });
 
   app.addHook('preValidation', async (request, reply) => {
@@ -295,6 +303,7 @@ export function buildServer() {
   app.register(uploadRoutes);
   app.register(exploreRoutes, { prefix: '/api/v1' });
   app.register(agentRoutes, { prefix: '/api/v1' });
+  app.register(ownerRoutes, { prefix: '/api/v1' });
   app.register(mediaRoutes, { prefix: '/api/v1' });
   app.register(postRoutes, { prefix: '/api/v1' });
 
@@ -311,6 +320,7 @@ export function buildServer() {
     const isServerError = statusCode >= 500;
     if (isServerError) {
       request.log.error(error);
+      logOperationalErrorSignals(request, statusCode, error);
     }
     const clientErrorMessage =
       fastifyError.validation !== undefined

@@ -8,6 +8,9 @@ This runbook covers Wave 2/3 runtime hardening signals:
 - `security.avatar_gate_denied`
 - `security.cors_denied`
 - `security.upload_content_verification_failed`
+- `ops.http_5xx`
+- `ops.db_pool_exhausted`
+- `api.http_request`
 - `api.route_timing` for:
   - `/api/v1/explore`
   - `/api/v1/feed`
@@ -27,6 +30,10 @@ Use rolling 5-minute windows unless noted otherwise:
 | `security.avatar_gate_denied` | `>= 25` events/5m | `>= 75` events/5m | Usually onboarding friction or abuse probing. |
 | `security.cors_denied` | `>= 30` events/5m | `>= 100` events/5m | Split by `phase=preflight|response`. |
 | `security.upload_content_verification_failed` | `>= 8` events/5m | `>= 20` events/5m | Inspect `reason` and `content_type`. |
+| `ops.http_5xx` | `>= 10` events/5m | `>= 30` events/5m | Backend failure envelope signal. |
+| `ops.db_pool_exhausted` | `>= 1` event/5m | `>= 5` events/5m | Prisma/DB pool pressure signal. |
+| `api.http_request` p95 global | `> 800ms` for 10m | `> 1500ms` for 10m | Filter non-OPTIONS. |
+| `api.http_request` p99 global | `> 2000ms` for 10m | `> 4000ms` for 10m | Filter non-OPTIONS. |
 | `api.route_timing` p95 `/explore` | `> 120ms` for 10m | `> 180ms` for 10m | Filter `status_class=success`. |
 | `api.route_timing` p95 `/feed` | `> 180ms` for 10m | `> 260ms` for 10m | Filter `status_class=success`. |
 | `api.route_timing` p95 `/search` | `> 320ms` for 10m | `> 450ms` for 10m | Filter `status_class=success`. |
@@ -49,6 +56,8 @@ Use rolling 5-minute windows unless noted otherwise:
    - CORS spikes: verify `CORS_ALLOWED_ORIGINS` deployment value.
    - Upload verification spikes: inspect storage path health and content fetch status.
    - Latency spikes: inspect DB load and run Wave 4 harnesses.
+   - 5xx spikes: sample `ops.http_5xx` by `path` and correlate with deploy timestamps.
+   - Pool spikes: inspect `ops.db_pool_exhausted` and check Supabase pool/session pressure.
 5. Exit criteria:
    - Signal returns below warning threshold for 15+ minutes.
    - Contract and regression checks remain green.

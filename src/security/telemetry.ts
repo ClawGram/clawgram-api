@@ -30,6 +30,24 @@ function stripQueryString(url: string): string {
   return url.slice(0, querySeparatorIndex);
 }
 
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null;
+  }
+  return value;
+}
+
+function toErrorFieldString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function toErrorRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
 export function logSecurityEvent(
   request: FastifyRequest,
   event: string,
@@ -78,6 +96,38 @@ function hasCursorQueryValue(query: Record<string, unknown>, key: string): boole
 
 function toRoundedMilliseconds(durationMs: number): number {
   return Number(durationMs.toFixed(3));
+}
+
+function inspectPoolExhaustion(error: unknown): {
+  isPoolExhaustion: boolean;
+  prismaCode: string | null;
+  modelName: string | null;
+  connectionLimit: number | null;
+  timeoutSeconds: number | null;
+  message: string | null;
+} {
+  const errorRecord = toErrorRecord(error);
+  const meta = toErrorRecord(errorRecord.meta);
+  const message = toErrorFieldString(errorRecord.message);
+  const prismaCode = toErrorFieldString(errorRecord.code);
+  const modelName = toErrorFieldString(meta.modelName);
+  const connectionLimit = toFiniteNumber(meta.connection_limit);
+  const timeoutSeconds = toFiniteNumber(meta.timeout);
+  const normalizedMessage = message?.toLowerCase() ?? '';
+  const isPoolExhaustion =
+    prismaCode === 'P2024' ||
+    normalizedMessage.includes('connection pool') ||
+    normalizedMessage.includes('max clients reached') ||
+    normalizedMessage.includes('pool_size');
+
+  return {
+    isPoolExhaustion,
+    prismaCode,
+    modelName,
+    connectionLimit,
+    timeoutSeconds,
+    message,
+  };
 }
 
 function buildWaveRouteTimingEvent(
@@ -182,5 +232,67 @@ export function logWaveRouteTiming(request: FastifyRequest, statusCode: number, 
       ...event,
     },
     'api.route_timing',
+  );
+}
+
+export function logHttpRequestSummary(request: FastifyRequest, statusCode: number, durationMs: number) {
+  if (request.method.toUpperCase() === 'OPTIONS') {
+    return;
+  }
+
+  request.log.info(
+    {
+      event: 'api.http_request',
+      request_id: request.id,
+      method: request.method.toUpperCase(),
+      path: stripQueryString(request.url),
+      status_code: statusCode,
+      status_class: toStatusClass(statusCode),
+      duration_ms: toRoundedMilliseconds(durationMs),
+    },
+    'api.http_request',
+  );
+}
+
+export function logOperationalErrorSignals(
+  request: FastifyRequest,
+  statusCode: number,
+  error: unknown,
+) {
+  if (statusCode < 500) {
+    return;
+  }
+
+  request.log.error(
+    {
+      event: 'ops.http_5xx',
+      request_id: request.id,
+      method: request.method.toUpperCase(),
+      path: stripQueryString(request.url),
+      status_code: statusCode,
+      status_class: toStatusClass(statusCode),
+    },
+    'ops.http_5xx',
+  );
+
+  const poolDetails = inspectPoolExhaustion(error);
+  if (!poolDetails.isPoolExhaustion) {
+    return;
+  }
+
+  request.log.error(
+    {
+      event: 'ops.db_pool_exhausted',
+      request_id: request.id,
+      method: request.method.toUpperCase(),
+      path: stripQueryString(request.url),
+      status_code: statusCode,
+      prisma_code: poolDetails.prismaCode,
+      model_name: poolDetails.modelName,
+      connection_limit: poolDetails.connectionLimit,
+      timeout_seconds: poolDetails.timeoutSeconds,
+      reason: poolDetails.message,
+    },
+    'ops.db_pool_exhausted',
   );
 }
