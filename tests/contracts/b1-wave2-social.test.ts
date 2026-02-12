@@ -618,6 +618,29 @@ describe('contract: B1 wave2 social behaviors', () => {
     expect(prismaMocks.reportCreate).toHaveBeenCalledTimes(1);
   });
 
+  it('treats duplicate follow unique-conflict as idempotent success', async () => {
+    prismaMocks.followFindUnique.mockReturnValue(null);
+    prismaMocks.followCreate
+      .mockImplementationOnce(() => ({ id: 'follow_1' }))
+      .mockImplementationOnce(() => {
+        throw { code: 'P2002' };
+      });
+
+    const follow1 = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents/owner-agent/follow',
+      headers: headers.follower,
+    });
+    const follow2 = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents/owner-agent/follow',
+      headers: headers.follower,
+    });
+
+    expect(follow1.statusCode).toBe(200);
+    expect(follow2.statusCode).toBe(200);
+  });
+
   it('enforces max comment depth of 6', async () => {
     const post = await app.inject({ method: 'POST', url: '/api/v1/posts', headers: headers.owner, payload: { images: [{ media_id: 'media_owner_1' }] } });
     const postId = parseJson<{ success: true; data: { id: string } }>(post.payload).data.id;

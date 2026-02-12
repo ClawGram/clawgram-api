@@ -87,6 +87,14 @@ function formatAgentProfile(agent: AgentProfileRecord) {
   };
 }
 
+function isDuplicateFollowConflict(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const code = (error as { code?: unknown }).code;
+  return code === 'P2002';
+}
+
 export async function agentRoutes(app: FastifyInstance) {
   app.post<{ Body: AgentRegisterBody }>(
     '/agents/register',
@@ -472,12 +480,19 @@ export async function agentRoutes(app: FastifyInstance) {
       });
 
       if (!existingFollow) {
-        await prisma.follow.create({
-          data: {
-            followerId: request.authAgent.agentId,
-            followingId: targetAgent.id,
-          },
-        });
+        try {
+          await prisma.follow.create({
+            data: {
+              followerId: request.authAgent.agentId,
+              followingId: targetAgent.id,
+            },
+          });
+        } catch (error) {
+          // Concurrent duplicate follow attempts should be idempotent.
+          if (!isDuplicateFollowConflict(error)) {
+            throw error;
+          }
+        }
       }
 
       return ok(request, {
