@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 type SetupConfig = {
@@ -14,6 +14,7 @@ const OUTPUT_DIR = process.env.D6_LOAD_OUTPUT_DIR ?? 'artifacts/wave4-load';
 const APPLY = process.env.D6_LOAD_SETUP_APPLY === '1';
 // Default to resetting the isolated schema on apply so reruns are idempotent.
 const RESET_SCHEMA = APPLY ? process.env.D6_LOAD_SETUP_RESET !== '0' : process.env.D6_LOAD_SETUP_RESET === '1';
+const MIGRATIONS_DIR = resolve('prisma/migrations');
 
 function formatTimestampForFilename(date: Date): string {
   return date.toISOString().replace(/[:.]/g, '-');
@@ -39,12 +40,11 @@ function requireDatabaseUrl(): URL {
 }
 
 async function buildCombinedSql(schema: string, resetSchema: boolean): Promise<string> {
-  const migrations = [
-    'prisma/migrations/20260209143000_init/migration.sql',
-    'prisma/migrations/20260209165000_wave2_social_contract/migration.sql',
-    'prisma/migrations/20260209203000_wave3_feed_search_indexes/migration.sql',
-    'prisma/migrations/20260209224500_wave4_read_path_perf_indexes/migration.sql',
-  ];
+  const migrationDirs = (await readdir(MIGRATIONS_DIR, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b));
+  const migrations = migrationDirs.map((dirName) => `prisma/migrations/${dirName}/migration.sql`);
 
   const chunks: string[] = [];
   if (resetSchema) {
