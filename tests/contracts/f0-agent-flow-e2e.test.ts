@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseJson } from './helpers/contract-test-helpers';
 
 const transportState = vi.hoisted(() => ({
   deliveries: [] as Array<{
@@ -50,61 +51,23 @@ vi.mock('../../src/owner/email-transport', () => ({
   }),
 }));
 
-vi.mock('../../src/db', () => ({
-  prisma: {
-    agent: {
-      create: prismaMocks.agentCreate,
-      findUnique: prismaMocks.agentFindUnique,
-      update: prismaMocks.agentUpdate,
-    },
-    apiKey: {
-      findUnique: prismaMocks.apiKeyFindUnique,
-      updateMany: prismaMocks.apiKeyUpdateMany,
-    },
-    owner: {
-      upsert: prismaMocks.ownerUpsert,
-    },
-    ownerEmailToken: {
-      create: prismaMocks.ownerEmailTokenCreate,
-      findUnique: prismaMocks.ownerEmailTokenFindUnique,
-      updateMany: prismaMocks.ownerEmailTokenUpdateMany,
-    },
-    ownerSession: {
-      create: prismaMocks.ownerSessionCreate,
-    },
-    agentOwnership: {
-      findUnique: prismaMocks.agentOwnershipFindUnique,
-      create: prismaMocks.agentOwnershipCreate,
-    },
-    upload: {
-      create: prismaMocks.uploadCreate,
-      findUnique: prismaMocks.uploadFindUnique,
-      update: prismaMocks.uploadUpdate,
-      findFirst: prismaMocks.uploadFindFirst,
-      findMany: prismaMocks.uploadFindMany,
-    },
-    media: {
-      create: prismaMocks.mediaCreate,
-      findUnique: prismaMocks.mediaFindUnique,
-    },
-    post: {
-      create: prismaMocks.postCreate,
-      findUnique: prismaMocks.postFindUnique,
-      update: prismaMocks.postUpdate,
-    },
-    follow: {
-      findUnique: prismaMocks.followFindUnique,
-      create: prismaMocks.followCreate,
-      deleteMany: prismaMocks.followDeleteMany,
-    },
-    like: {
-      findUnique: prismaMocks.likeFindUnique,
-      create: prismaMocks.likeCreate,
-      deleteMany: prismaMocks.likeDeleteMany,
-    },
-    $transaction: prismaMocks.transaction,
-  },
-}));
+vi.mock('../../src/db', async () => {
+  const { createPrismaDbMock } = await import('./helpers/contract-test-helpers');
+  return createPrismaDbMock(prismaMocks, {
+    agent: ['create', 'findUnique', 'update'],
+    apiKey: ['findUnique', 'updateMany'],
+    owner: ['upsert'],
+    ownerEmailToken: ['create', 'findUnique', 'updateMany'],
+    ownerSession: ['create'],
+    agentOwnership: ['findUnique', 'create'],
+    upload: ['create', 'findUnique', 'update', 'findFirst', 'findMany'],
+    media: ['create', 'findUnique'],
+    post: ['create', 'findUnique', 'update'],
+    follow: ['findUnique', 'create', 'deleteMany'],
+    like: ['findUnique', 'create', 'deleteMany'],
+    $transaction: 'transaction',
+  });
+});
 
 type ClaimStatus = 'pending_claim' | 'claimed';
 
@@ -183,10 +146,6 @@ type PostRecord = {
   mediaIds: string[];
   hashtags: string[];
 };
-
-function parseJson<T>(payload: string): T {
-  return JSON.parse(payload) as T;
-}
 
 function selectProjection(
   row: Record<string, unknown>,

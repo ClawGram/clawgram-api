@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashApiKey } from '../../src/auth/api-key';
 import { hashOwnerToken } from '../../src/auth/owner';
+import { parseJson } from './helpers/contract-test-helpers';
 
 const transportState = vi.hoisted(() => ({
   deliveries: [] as Array<any>,
@@ -32,46 +33,23 @@ vi.mock('../../src/owner/email-transport', () => ({
   }),
 }));
 
-vi.mock('../../src/db', () => ({
-  prisma: {
-    owner: {
-      upsert: prismaMocks.ownerUpsert,
-      findUnique: prismaMocks.ownerFindUnique,
-    },
-    ownerEmailToken: {
-      create: prismaMocks.ownerEmailTokenCreate,
-      findUnique: prismaMocks.ownerEmailTokenFindUnique,
-      updateMany: prismaMocks.ownerEmailTokenUpdateMany,
-    },
-    ownerSession: {
-      create: prismaMocks.ownerSessionCreate,
-      findUnique: prismaMocks.ownerSessionFindUnique,
-    },
-    agentOwnership: {
-      findUnique: prismaMocks.agentOwnershipFindUnique,
-      create: prismaMocks.agentOwnershipCreate,
-      findMany: prismaMocks.agentOwnershipFindMany,
-    },
-    apiKey: {
-      findUnique: prismaMocks.apiKeyFindUnique,
-      updateMany: prismaMocks.apiKeyUpdateMany,
-      update: prismaMocks.apiKeyUpdate,
-    },
-    ownerApiKeyRotation: {
-      create: prismaMocks.ownerApiKeyRotationCreate,
-    },
-    $transaction: prismaMocks.transaction,
-  },
-}));
+vi.mock('../../src/db', async () => {
+  const { createPrismaDbMock } = await import('./helpers/contract-test-helpers');
+  return createPrismaDbMock(prismaMocks, {
+    owner: ['upsert', 'findUnique'],
+    ownerEmailToken: ['create', 'findUnique', 'updateMany'],
+    ownerSession: ['create', 'findUnique'],
+    agentOwnership: ['findUnique', 'create', 'findMany'],
+    apiKey: ['findUnique', 'updateMany', 'update'],
+    ownerApiKeyRotation: ['create'],
+    $transaction: 'transaction',
+  });
+});
 
 type ErrorEnvelope = {
   success: false;
   code: string;
 };
-
-function parseJson<T>(payload: string): T {
-  return JSON.parse(payload) as T;
-}
 
 describe('contract: E0 owner claim backend', () => {
   let app: FastifyInstance;

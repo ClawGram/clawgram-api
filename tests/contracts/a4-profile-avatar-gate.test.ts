@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseJson } from './helpers/contract-test-helpers';
 
 const prismaMocks = vi.hoisted(() => ({
   agentCreate: vi.fn(),
@@ -15,31 +16,17 @@ const prismaMocks = vi.hoisted(() => ({
   followDeleteMany: vi.fn(),
 }));
 
-vi.mock('../../src/db', () => ({
-  prisma: {
-    agent: {
-      create: prismaMocks.agentCreate,
-      findUnique: prismaMocks.agentFindUnique,
-      update: prismaMocks.agentUpdate,
-    },
-    apiKey: {
-      findUnique: prismaMocks.apiKeyFindUnique,
-      updateMany: prismaMocks.apiKeyUpdateMany,
-    },
-    upload: {
-      findFirst: prismaMocks.uploadFindFirst,
-    },
-    media: {
-      findUnique: prismaMocks.mediaFindUnique,
-    },
-    follow: {
-      findUnique: prismaMocks.followFindUnique,
-      create: prismaMocks.followCreate,
-      deleteMany: prismaMocks.followDeleteMany,
-    },
-    $transaction: prismaMocks.transaction,
-  },
-}));
+vi.mock('../../src/db', async () => {
+  const { createPrismaDbMock } = await import('./helpers/contract-test-helpers');
+  return createPrismaDbMock(prismaMocks, {
+    agent: ['create', 'findUnique', 'update'],
+    apiKey: ['findUnique', 'updateMany'],
+    upload: ['findFirst'],
+    media: ['findUnique'],
+    follow: ['findUnique', 'create', 'deleteMany'],
+    $transaction: 'transaction',
+  });
+});
 
 type ErrorEnvelope = {
   success: false;
@@ -60,10 +47,6 @@ type AgentState = {
   lastActive: Date | null;
   metadata: Record<string, unknown> | null;
 };
-
-function parseJson<T>(payload: string): T {
-  return JSON.parse(payload) as T;
-}
 
 function createAgentSelectProjection(
   agent: AgentState,

@@ -2,6 +2,7 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashApiKey } from '../../src/auth/api-key';
+import { parseJson } from './helpers/contract-test-helpers';
 
 const prismaMocks = vi.hoisted(() => ({
   apiKeyFindUnique: vi.fn(),
@@ -27,44 +28,20 @@ const prismaMocks = vi.hoisted(() => ({
   transaction: vi.fn(),
 }));
 
-vi.mock('../../src/db', () => ({
-  prisma: {
-    apiKey: { findUnique: prismaMocks.apiKeyFindUnique },
-    agent: { findUnique: prismaMocks.agentFindUnique, update: prismaMocks.agentUpdate },
-    upload: { findMany: prismaMocks.uploadFindMany },
-    post: {
-      create: prismaMocks.postCreate,
-      findUnique: prismaMocks.postFindUnique,
-      update: prismaMocks.postUpdate,
-    },
-    like: {
-      findUnique: prismaMocks.likeFindUnique,
-      create: prismaMocks.likeCreate,
-      deleteMany: prismaMocks.likeDeleteMany,
-    },
-    follow: {
-      findUnique: prismaMocks.followFindUnique,
-      create: prismaMocks.followCreate,
-      deleteMany: prismaMocks.followDeleteMany,
-    },
-    comment: {
-      findUnique: prismaMocks.commentFindUnique,
-      create: prismaMocks.commentCreate,
-      findMany: prismaMocks.commentFindMany,
-      groupBy: prismaMocks.commentGroupBy,
-      update: prismaMocks.commentUpdate,
-    },
-    report: {
-      findUnique: prismaMocks.reportFindUnique,
-      create: prismaMocks.reportCreate,
-    },
-    $transaction: prismaMocks.transaction,
-  },
-}));
-
-function parseJson<T>(payload: string): T {
-  return JSON.parse(payload) as T;
-}
+vi.mock('../../src/db', async () => {
+  const { createPrismaDbMock } = await import('./helpers/contract-test-helpers');
+  return createPrismaDbMock(prismaMocks, {
+    apiKey: ['findUnique'],
+    agent: ['findUnique', 'update'],
+    upload: ['findMany'],
+    post: ['create', 'findUnique', 'update'],
+    like: ['findUnique', 'create', 'deleteMany'],
+    follow: ['findUnique', 'create', 'deleteMany'],
+    comment: ['findUnique', 'create', 'findMany', 'groupBy', 'update'],
+    report: ['findUnique', 'create'],
+    $transaction: 'transaction',
+  });
+});
 
 describe('contract: B1 wave2 social behaviors', () => {
   let app: FastifyInstance;

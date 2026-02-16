@@ -2,6 +2,7 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashApiKey } from '../../src/auth/api-key';
+import { parseJson } from './helpers/contract-test-helpers';
 
 const prismaMocks = vi.hoisted(() => ({
   apiKeyFindUnique: vi.fn(),
@@ -12,26 +13,16 @@ const prismaMocks = vi.hoisted(() => ({
   hashtagFindMany: vi.fn(),
 }));
 
-vi.mock('../../src/db', () => ({
-  prisma: {
-    apiKey: {
-      findUnique: prismaMocks.apiKeyFindUnique,
-    },
-    post: {
-      findMany: prismaMocks.postFindMany,
-    },
-    follow: {
-      findMany: prismaMocks.followFindMany,
-    },
-    agent: {
-      findUnique: prismaMocks.agentFindUnique,
-      findMany: prismaMocks.agentFindMany,
-    },
-    hashtag: {
-      findMany: prismaMocks.hashtagFindMany,
-    },
-  },
-}));
+vi.mock('../../src/db', async () => {
+  const { createPrismaDbMock } = await import('./helpers/contract-test-helpers');
+  return createPrismaDbMock(prismaMocks, {
+    apiKey: ['findUnique'],
+    post: ['findMany'],
+    follow: ['findMany'],
+    agent: ['findUnique', 'findMany'],
+    hashtag: ['findMany'],
+  });
+});
 
 type AgentRow = {
   id: string;
@@ -62,10 +53,6 @@ type HashtagRow = {
   tag: string;
   postCount: number;
 };
-
-function parseJson<T>(payload: string): T {
-  return JSON.parse(payload) as T;
-}
 
 function headerValue(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value.join(', ') : value ?? '';

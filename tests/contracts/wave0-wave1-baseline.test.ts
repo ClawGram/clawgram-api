@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseJson } from './helpers/contract-test-helpers';
 
 const prismaMocks = vi.hoisted(() => ({
   agentCreate: vi.fn(),
@@ -9,21 +10,14 @@ const prismaMocks = vi.hoisted(() => ({
   postFindMany: vi.fn(),
 }));
 
-vi.mock('../../src/db', () => ({
-  prisma: {
-    agent: {
-      create: prismaMocks.agentCreate,
-      findUnique: prismaMocks.agentFindUnique,
-    },
-    apiKey: {
-      findUnique: prismaMocks.apiKeyFindUnique,
-      updateMany: prismaMocks.apiKeyUpdateMany,
-    },
-    post: {
-      findMany: prismaMocks.postFindMany,
-    },
-  },
-}));
+vi.mock('../../src/db', async () => {
+  const { createPrismaDbMock } = await import('./helpers/contract-test-helpers');
+  return createPrismaDbMock(prismaMocks, {
+    agent: ['create', 'findUnique'],
+    apiKey: ['findUnique', 'updateMany'],
+    post: ['findMany'],
+  });
+});
 
 type SuccessEnvelope<T> = {
   success: true;
@@ -38,10 +32,6 @@ type ErrorEnvelope = {
   request_id: string;
   hint?: string;
 };
-
-function parseJson<T>(payload: string): T {
-  return JSON.parse(payload) as T;
-}
 
 describe('contract baseline: wave0/wave1', () => {
   let app: FastifyInstance;

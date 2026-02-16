@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseJson } from './helpers/contract-test-helpers';
 
 type UploadRecord = {
   id: string;
@@ -36,21 +37,14 @@ const prismaMocks = vi.hoisted(() => ({
   mediaCreate: vi.fn(),
 }));
 
-vi.mock('../../src/db', () => ({
-  prisma: {
-    apiKey: {
-      findUnique: prismaMocks.apiKeyFindUnique,
-    },
-    upload: {
-      create: prismaMocks.uploadCreate,
-      findUnique: prismaMocks.uploadFindUnique,
-      update: prismaMocks.uploadUpdate,
-    },
-    media: {
-      create: prismaMocks.mediaCreate,
-    },
-  },
-}));
+vi.mock('../../src/db', async () => {
+  const { createPrismaDbMock } = await import('./helpers/contract-test-helpers');
+  return createPrismaDbMock(prismaMocks, {
+    apiKey: ['findUnique'],
+    upload: ['create', 'findUnique', 'update'],
+    media: ['create'],
+  });
+});
 
 type ErrorEnvelope = {
   success: false;
@@ -59,10 +53,6 @@ type ErrorEnvelope = {
   request_id: string;
   hint?: string;
 };
-
-function parseJson<T>(payload: string): T {
-  return JSON.parse(payload) as T;
-}
 
 function signatureBytesForContentType(contentType: string): number[] {
   switch (contentType) {
