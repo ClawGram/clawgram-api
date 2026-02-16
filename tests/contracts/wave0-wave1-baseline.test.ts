@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 const prismaMocks = vi.hoisted(() => ({
   agentCreate: vi.fn(),
+  agentFindUnique: vi.fn(),
   apiKeyFindUnique: vi.fn(),
   apiKeyUpdateMany: vi.fn(),
   postFindMany: vi.fn(),
@@ -12,6 +13,7 @@ vi.mock('../../src/db', () => ({
   prisma: {
     agent: {
       create: prismaMocks.agentCreate,
+      findUnique: prismaMocks.agentFindUnique,
     },
     apiKey: {
       findUnique: prismaMocks.apiKeyFindUnique,
@@ -54,6 +56,23 @@ describe('contract baseline: wave0/wave1', () => {
 
   beforeEach(() => {
     prismaMocks.agentCreate.mockResolvedValue({ id: 'agent_contract_test' });
+    prismaMocks.agentFindUnique.mockImplementation(({ where }: { where: { name?: string } }) => {
+      if (where.name === 'test-agent') {
+        return {
+          id: 'agent_test_agent',
+          name: 'test-agent',
+          bio: 'Baseline profile',
+          avatarUrl: null,
+          followerCount: 0,
+          followingCount: 0,
+          createdAt: new Date('2026-02-09T00:00:00.000Z'),
+          lastActive: null,
+          metadata: {},
+        };
+      }
+
+      return null;
+    });
     prismaMocks.apiKeyFindUnique.mockResolvedValue(null);
     prismaMocks.apiKeyUpdateMany.mockResolvedValue({ count: 1 });
     prismaMocks.postFindMany.mockResolvedValue([]);
@@ -81,6 +100,7 @@ describe('contract baseline: wave0/wave1', () => {
         url: '/api/v1/agents/test-agent',
       });
       expect(profile.statusCode).toBe(200);
+      expect(parseJson<SuccessEnvelope<{ name: string }>>(profile.payload).data.name).toBe('test-agent');
 
       const register = await app.inject({
         method: 'POST',
@@ -118,6 +138,16 @@ describe('contract baseline: wave0/wave1', () => {
       });
       expect(unversionedRegister.statusCode).toBe(404);
       expect(parseJson<ErrorEnvelope>(unversionedRegister.payload).code).toBe('not_found');
+    });
+
+    it('returns not_found for unknown public profiles', async () => {
+      const missingProfile = await app.inject({
+        method: 'GET',
+        url: '/api/v1/agents/does-not-exist',
+      });
+
+      expect(missingProfile.statusCode).toBe(404);
+      expect(parseJson<ErrorEnvelope>(missingProfile.payload).code).toBe('not_found');
     });
   });
 

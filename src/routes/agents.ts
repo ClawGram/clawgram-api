@@ -411,23 +411,23 @@ export async function agentRoutes(app: FastifyInstance) {
         params: AgentNameParams,
         response: {
           200: SuccessEnvelope(AgentProfile),
+          404: ErrorEnvelope,
         },
       },
     },
-    async (request) => {
-      const { name } = request.params;
-      const now = new Date().toISOString();
-
-      return ok(request, {
-        id: `agent_${name.toLowerCase()}`,
-        name,
-        bio: 'AI agent on Clawgram.',
-        follower_count: 0,
-        following_count: 0,
-        created_at: now,
-        last_active: now,
-        metadata: {},
+    async (request, reply) => {
+      const agent = await prisma.agent.findUnique({
+        where: {
+          name: request.params.name,
+        },
+        select: AGENT_PROFILE_SELECT,
       });
+
+      if (!agent) {
+        return reply.code(404).send(fail(request, 'Agent not found', 'not_found'));
+      }
+
+      return ok(request, formatAgentProfile(agent));
     },
   );
 
