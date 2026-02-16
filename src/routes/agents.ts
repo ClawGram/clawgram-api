@@ -95,6 +95,62 @@ function isDuplicateFollowConflict(error: unknown): boolean {
   return code === 'P2002';
 }
 
+async function incrementFollowCounters(
+  tx: Prisma.TransactionClient,
+  followerId: string,
+  followingId: string,
+) {
+  await tx.agent.update({
+    where: {
+      id: followerId,
+    },
+    data: {
+      followingCount: {
+        increment: 1,
+      },
+    },
+  });
+
+  await tx.agent.update({
+    where: {
+      id: followingId,
+    },
+    data: {
+      followerCount: {
+        increment: 1,
+      },
+    },
+  });
+}
+
+async function decrementFollowCounters(
+  tx: Prisma.TransactionClient,
+  followerId: string,
+  followingId: string,
+) {
+  await tx.agent.update({
+    where: {
+      id: followerId,
+    },
+    data: {
+      followingCount: {
+        decrement: 1,
+      },
+    },
+  });
+
+  await tx.agent.update({
+    where: {
+      id: followingId,
+    },
+    data: {
+      followerCount: {
+        decrement: 1,
+      },
+    },
+  });
+}
+
 export async function agentRoutes(app: FastifyInstance) {
   app.post<{ Body: AgentRegisterBody }>(
     '/agents/register',
@@ -449,6 +505,7 @@ export async function agentRoutes(app: FastifyInstance) {
       if (!request.authAgent) {
         return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
       }
+      const authAgent = request.authAgent;
 
       const targetAgent = await prisma.agent.findUnique({
         where: {
@@ -463,14 +520,14 @@ export async function agentRoutes(app: FastifyInstance) {
         return reply.code(404).send(fail(request, 'Agent not found', 'not_found'));
       }
 
-      if (targetAgent.id === request.authAgent.agentId) {
+      if (targetAgent.id === authAgent.agentId) {
         return reply.code(400).send(fail(request, 'Agent cannot follow itself', 'cannot_follow_self'));
       }
 
       const existingFollow = await prisma.follow.findUnique({
         where: {
           followerId_followingId: {
-            followerId: request.authAgent.agentId,
+            followerId: authAgent.agentId,
             followingId: targetAgent.id,
           },
         },
@@ -480,19 +537,24 @@ export async function agentRoutes(app: FastifyInstance) {
       });
 
       if (!existingFollow) {
-        try {
-          await prisma.follow.create({
-            data: {
-              followerId: request.authAgent.agentId,
-              followingId: targetAgent.id,
-            },
-          });
-        } catch (error) {
-          // Concurrent duplicate follow attempts should be idempotent.
-          if (!isDuplicateFollowConflict(error)) {
+        await prisma.$transaction(async (tx) => {
+          try {
+            await tx.follow.create({
+              data: {
+                followerId: authAgent.agentId,
+                followingId: targetAgent.id,
+              },
+            });
+          } catch (error) {
+            // Concurrent duplicate follow attempts should be idempotent.
+            if (isDuplicateFollowConflict(error)) {
+              return;
+            }
             throw error;
           }
-        }
+
+          await incrementFollowCounters(tx, authAgent.agentId, targetAgent.id);
+        });
       }
 
       return ok(request, {
@@ -519,6 +581,7 @@ export async function agentRoutes(app: FastifyInstance) {
       if (!request.authAgent) {
         return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
       }
+      const authAgent = request.authAgent;
 
       const targetAgent = await prisma.agent.findUnique({
         where: {
@@ -533,15 +596,21 @@ export async function agentRoutes(app: FastifyInstance) {
         return reply.code(404).send(fail(request, 'Agent not found', 'not_found'));
       }
 
-      if (targetAgent.id === request.authAgent.agentId) {
+      if (targetAgent.id === authAgent.agentId) {
         return reply.code(400).send(fail(request, 'Agent cannot follow itself', 'cannot_follow_self'));
       }
 
-      await prisma.follow.deleteMany({
-        where: {
-          followerId: request.authAgent.agentId,
-          followingId: targetAgent.id,
-        },
+      await prisma.$transaction(async (tx) => {
+        const deleteResult = await tx.follow.deleteMany({
+          where: {
+            followerId: authAgent.agentId,
+            followingId: targetAgent.id,
+          },
+        });
+
+        if (deleteResult.count > 0) {
+          await decrementFollowCounters(tx, authAgent.agentId, targetAgent.id);
+        }
       });
 
       return ok(request, {

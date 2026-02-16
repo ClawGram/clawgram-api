@@ -6,6 +6,7 @@ import { hashApiKey } from '../../src/auth/api-key';
 const prismaMocks = vi.hoisted(() => ({
   apiKeyFindUnique: vi.fn(),
   agentFindUnique: vi.fn(),
+  agentUpdate: vi.fn(),
   uploadFindMany: vi.fn(),
   postCreate: vi.fn(),
   postFindUnique: vi.fn(),
@@ -29,7 +30,7 @@ const prismaMocks = vi.hoisted(() => ({
 vi.mock('../../src/db', () => ({
   prisma: {
     apiKey: { findUnique: prismaMocks.apiKeyFindUnique },
-    agent: { findUnique: prismaMocks.agentFindUnique },
+    agent: { findUnique: prismaMocks.agentFindUnique, update: prismaMocks.agentUpdate },
     upload: { findMany: prismaMocks.uploadFindMany },
     post: {
       create: prismaMocks.postCreate,
@@ -81,7 +82,7 @@ describe('contract: B1 wave2 social behaviors', () => {
     claimed5: { authorization: 'Bearer claw_test_claimed_5' },
   };
 
-  type Agent = { id: string; name: string; avatarUrl: string };
+  type Agent = { id: string; name: string; avatarUrl: string; followerCount: number; followingCount: number };
   type Post = {
     id: string;
     agentId: string;
@@ -133,15 +134,15 @@ describe('contract: B1 wave2 social behaviors', () => {
     vi.clearAllMocks();
     sequence = 0;
     agentsById = new Map([
-      ['agent_owner', { id: 'agent_owner', name: 'owner-agent', avatarUrl: 'https://cdn/avatar-owner.png' }],
-      ['agent_commenter', { id: 'agent_commenter', name: 'commenter-agent', avatarUrl: 'https://cdn/avatar-commenter.png' }],
-      ['agent_follower', { id: 'agent_follower', name: 'follower-agent', avatarUrl: 'https://cdn/avatar-follower.png' }],
-      ['agent_outsider', { id: 'agent_outsider', name: 'outsider-agent', avatarUrl: 'https://cdn/avatar-outsider.png' }],
-      ['agent_claimed_1', { id: 'agent_claimed_1', name: 'claimed-1', avatarUrl: 'https://cdn/avatar-c1.png' }],
-      ['agent_claimed_2', { id: 'agent_claimed_2', name: 'claimed-2', avatarUrl: 'https://cdn/avatar-c2.png' }],
-      ['agent_claimed_3', { id: 'agent_claimed_3', name: 'claimed-3', avatarUrl: 'https://cdn/avatar-c3.png' }],
-      ['agent_claimed_4', { id: 'agent_claimed_4', name: 'claimed-4', avatarUrl: 'https://cdn/avatar-c4.png' }],
-      ['agent_claimed_5', { id: 'agent_claimed_5', name: 'claimed-5', avatarUrl: 'https://cdn/avatar-c5.png' }],
+      ['agent_owner', { id: 'agent_owner', name: 'owner-agent', avatarUrl: 'https://cdn/avatar-owner.png', followerCount: 0, followingCount: 0 }],
+      ['agent_commenter', { id: 'agent_commenter', name: 'commenter-agent', avatarUrl: 'https://cdn/avatar-commenter.png', followerCount: 0, followingCount: 0 }],
+      ['agent_follower', { id: 'agent_follower', name: 'follower-agent', avatarUrl: 'https://cdn/avatar-follower.png', followerCount: 0, followingCount: 0 }],
+      ['agent_outsider', { id: 'agent_outsider', name: 'outsider-agent', avatarUrl: 'https://cdn/avatar-outsider.png', followerCount: 0, followingCount: 0 }],
+      ['agent_claimed_1', { id: 'agent_claimed_1', name: 'claimed-1', avatarUrl: 'https://cdn/avatar-c1.png', followerCount: 0, followingCount: 0 }],
+      ['agent_claimed_2', { id: 'agent_claimed_2', name: 'claimed-2', avatarUrl: 'https://cdn/avatar-c2.png', followerCount: 0, followingCount: 0 }],
+      ['agent_claimed_3', { id: 'agent_claimed_3', name: 'claimed-3', avatarUrl: 'https://cdn/avatar-c3.png', followerCount: 0, followingCount: 0 }],
+      ['agent_claimed_4', { id: 'agent_claimed_4', name: 'claimed-4', avatarUrl: 'https://cdn/avatar-c4.png', followerCount: 0, followingCount: 0 }],
+      ['agent_claimed_5', { id: 'agent_claimed_5', name: 'claimed-5', avatarUrl: 'https://cdn/avatar-c5.png', followerCount: 0, followingCount: 0 }],
     ]);
 
     const addKey = (raw: string, agentId: string, status: 'pending_claim' | 'claimed') => {
@@ -187,6 +188,34 @@ describe('contract: B1 wave2 social behaviors', () => {
       }
       return null;
     });
+    prismaMocks.agentUpdate.mockImplementation(
+      ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: { followerCount?: { increment?: number; decrement?: number }; followingCount?: { increment?: number; decrement?: number } };
+      }) => {
+        const agent = agentsById.get(where.id);
+        if (!agent) {
+          throw new Error('missing agent');
+        }
+
+        const next: Agent = {
+          ...agent,
+          followerCount:
+            agent.followerCount +
+            (data.followerCount?.increment ?? 0) -
+            (data.followerCount?.decrement ?? 0),
+          followingCount:
+            agent.followingCount +
+            (data.followingCount?.increment ?? 0) -
+            (data.followingCount?.decrement ?? 0),
+        };
+        agentsById.set(where.id, next);
+        return next;
+      },
+    );
 
     prismaMocks.uploadFindMany.mockImplementation(({ where }: { where: { agentId: string; mediaId: { in: string[] } } }) => {
       const owned = uploadsOwned.get(where.agentId) ?? [];
@@ -409,7 +438,23 @@ describe('contract: B1 wave2 social behaviors', () => {
       };
     });
 
-    prismaMocks.transaction.mockImplementation(async (operations: unknown[]) => Promise.all(operations));
+    prismaMocks.transaction.mockImplementation(async (argument: unknown) => {
+      if (typeof argument === 'function') {
+        return (argument as (tx: unknown) => unknown)({
+          follow: {
+            create: prismaMocks.followCreate,
+            deleteMany: prismaMocks.followDeleteMany,
+          },
+          agent: {
+            update: prismaMocks.agentUpdate,
+          },
+        });
+      }
+      if (Array.isArray(argument)) {
+        return Promise.all(argument);
+      }
+      return argument;
+    });
   });
 
   afterAll(async () => {
@@ -600,6 +645,7 @@ describe('contract: B1 wave2 social behaviors', () => {
     });
     expect(follow2.statusCode).toBe(200);
     expect(prismaMocks.followCreate).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.agentUpdate).toHaveBeenCalledTimes(2);
 
     const report1 = await app.inject({
       method: 'POST',
@@ -639,6 +685,25 @@ describe('contract: B1 wave2 social behaviors', () => {
 
     expect(follow1.statusCode).toBe(200);
     expect(follow2.statusCode).toBe(200);
+    expect(prismaMocks.agentUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects self follow attempts with cannot_follow_self', async () => {
+    const followSelf = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents/follower-agent/follow',
+      headers: headers.follower,
+    });
+    expect(followSelf.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(followSelf.payload).code).toBe('cannot_follow_self');
+
+    const unfollowSelf = await app.inject({
+      method: 'DELETE',
+      url: '/api/v1/agents/follower-agent/follow',
+      headers: headers.follower,
+    });
+    expect(unfollowSelf.statusCode).toBe(400);
+    expect(parseJson<{ code: string }>(unfollowSelf.payload).code).toBe('cannot_follow_self');
   });
 
   it('enforces max comment depth of 6', async () => {

@@ -5,6 +5,7 @@ const prismaMocks = vi.hoisted(() => ({
   agentCreate: vi.fn(),
   agentFindUnique: vi.fn(),
   agentUpdate: vi.fn(),
+  transaction: vi.fn(),
   apiKeyFindUnique: vi.fn(),
   apiKeyUpdateMany: vi.fn(),
   uploadFindFirst: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock('../../src/db', () => ({
       create: prismaMocks.followCreate,
       deleteMany: prismaMocks.followDeleteMany,
     },
+    $transaction: prismaMocks.transaction,
   },
 }));
 
@@ -95,11 +97,8 @@ describe('contract: A4 profile + avatar gate', () => {
   let app: FastifyInstance;
   const authHeader = { authorization: 'Bearer claw_test_a4_key' };
   let selfAgent: AgentState;
+  let targetAgent: AgentState;
   let followExists = false;
-  const targetAgent = {
-    id: 'agent_target',
-    name: 'target-agent',
-  };
 
   beforeAll(async () => {
     const { buildServer } = await import('../../src/server');
@@ -119,6 +118,17 @@ describe('contract: A4 profile + avatar gate', () => {
       lastActive: null,
       metadata: null,
     };
+    targetAgent = {
+      id: 'agent_target',
+      name: 'target-agent',
+      bio: 'Target profile',
+      avatarUrl: 'https://cdn.clawgram.test/media/target-avatar.jpg',
+      followerCount: 0,
+      followingCount: 0,
+      createdAt: new Date('2026-02-08T00:00:00.000Z'),
+      lastActive: null,
+      metadata: null,
+    };
     followExists = false;
 
     prismaMocks.apiKeyFindUnique.mockImplementation(({ where }: { where: { keyHash: string } }) => ({
@@ -131,11 +141,14 @@ describe('contract: A4 profile + avatar gate', () => {
         if (where.id === selfAgent.id) {
           return createAgentSelectProjection(selfAgent, select);
         }
+        if (where.id === targetAgent.id) {
+          return createAgentSelectProjection(targetAgent, select);
+        }
         if (where.name === targetAgent.name) {
-          return { id: targetAgent.id };
+          return createAgentSelectProjection(targetAgent, select);
         }
         if (where.name === selfAgent.name) {
-          return { id: selfAgent.id };
+          return createAgentSelectProjection(selfAgent, select);
         }
         return null;
       },
@@ -147,22 +160,41 @@ describe('contract: A4 profile + avatar gate', () => {
         select,
       }: {
         where: { id: string };
-        data: { bio?: string; avatarUrl?: string | null; metadata?: Record<string, unknown> };
+        data: {
+          bio?: string;
+          avatarUrl?: string | null;
+          metadata?: Record<string, unknown>;
+          followerCount?: { increment?: number; decrement?: number };
+          followingCount?: { increment?: number; decrement?: number };
+        };
         select?: Record<string, boolean>;
       }) => {
-        if (where.id !== selfAgent.id) {
+        const agentState = where.id === selfAgent.id ? selfAgent : where.id === targetAgent.id ? targetAgent : null;
+        if (!agentState) {
           throw new Error('Agent not found');
         }
         if (data.bio !== undefined) {
-          selfAgent.bio = data.bio;
+          agentState.bio = data.bio;
         }
         if (data.avatarUrl !== undefined) {
-          selfAgent.avatarUrl = data.avatarUrl;
+          agentState.avatarUrl = data.avatarUrl;
         }
         if (data.metadata !== undefined) {
-          selfAgent.metadata = data.metadata;
+          agentState.metadata = data.metadata;
         }
-        return createAgentSelectProjection(selfAgent, select);
+        if (data.followerCount?.increment !== undefined) {
+          agentState.followerCount += data.followerCount.increment;
+        }
+        if (data.followerCount?.decrement !== undefined) {
+          agentState.followerCount -= data.followerCount.decrement;
+        }
+        if (data.followingCount?.increment !== undefined) {
+          agentState.followingCount += data.followingCount.increment;
+        }
+        if (data.followingCount?.decrement !== undefined) {
+          agentState.followingCount -= data.followingCount.decrement;
+        }
+        return createAgentSelectProjection(agentState, select);
       },
     );
     prismaMocks.uploadFindFirst.mockImplementation(
@@ -203,6 +235,23 @@ describe('contract: A4 profile + avatar gate', () => {
       const deleted = followExists ? 1 : 0;
       followExists = false;
       return { count: deleted };
+    });
+    prismaMocks.transaction.mockImplementation(async (argument: unknown) => {
+      if (typeof argument === 'function') {
+        return (argument as (tx: unknown) => unknown)({
+          follow: {
+            create: prismaMocks.followCreate,
+            deleteMany: prismaMocks.followDeleteMany,
+          },
+          agent: {
+            update: prismaMocks.agentUpdate,
+          },
+        });
+      }
+      if (Array.isArray(argument)) {
+        return Promise.all(argument);
+      }
+      return argument;
     });
   });
 
@@ -307,6 +356,112 @@ describe('contract: A4 profile + avatar gate', () => {
     });
     expect(blockedAgain.statusCode).toBe(403);
     expect(parseJson<ErrorEnvelope>(blockedAgain.payload).code).toBe('avatar_required');
+  });
+
+  it('keeps follow counters consistent across idempotent retries', async () => {
+    const setAvatar = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents/me/avatar',
+      headers: authHeader,
+      payload: {
+        media_id: 'media_owned',
+      },
+    });
+    expect(setAvatar.statusCode).toBe(200);
+
+    const follow1 = await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${targetAgent.name}/follow`,
+      headers: authHeader,
+    });
+    expect(follow1.statusCode).toBe(200);
+
+    const follow2 = await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${targetAgent.name}/follow`,
+      headers: authHeader,
+    });
+    expect(follow2.statusCode).toBe(200);
+
+    const selfProfileAfterFollow = await app.inject({
+      method: 'GET',
+      url: '/api/v1/agents/me',
+      headers: authHeader,
+    });
+    const selfBodyAfterFollow = parseJson<{ success: true; data: { following_count: number } }>(
+      selfProfileAfterFollow.payload,
+    );
+    expect(selfBodyAfterFollow.data.following_count).toBe(1);
+
+    const targetProfileAfterFollow = await app.inject({
+      method: 'GET',
+      url: `/api/v1/agents/${targetAgent.name}`,
+    });
+    const targetBodyAfterFollow = parseJson<{ success: true; data: { follower_count: number } }>(
+      targetProfileAfterFollow.payload,
+    );
+    expect(targetBodyAfterFollow.data.follower_count).toBe(1);
+
+    const unfollow1 = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/agents/${targetAgent.name}/follow`,
+      headers: authHeader,
+    });
+    expect(unfollow1.statusCode).toBe(200);
+
+    const unfollow2 = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/agents/${targetAgent.name}/follow`,
+      headers: authHeader,
+    });
+    expect(unfollow2.statusCode).toBe(200);
+
+    const selfProfileAfterUnfollow = await app.inject({
+      method: 'GET',
+      url: '/api/v1/agents/me',
+      headers: authHeader,
+    });
+    const selfBodyAfterUnfollow = parseJson<{ success: true; data: { following_count: number } }>(
+      selfProfileAfterUnfollow.payload,
+    );
+    expect(selfBodyAfterUnfollow.data.following_count).toBe(0);
+
+    const targetProfileAfterUnfollow = await app.inject({
+      method: 'GET',
+      url: `/api/v1/agents/${targetAgent.name}`,
+    });
+    const targetBodyAfterUnfollow = parseJson<{ success: true; data: { follower_count: number } }>(
+      targetProfileAfterUnfollow.payload,
+    );
+    expect(targetBodyAfterUnfollow.data.follower_count).toBe(0);
+  });
+
+  it('rejects self follow writes with cannot_follow_self', async () => {
+    const setAvatar = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents/me/avatar',
+      headers: authHeader,
+      payload: {
+        media_id: 'media_owned',
+      },
+    });
+    expect(setAvatar.statusCode).toBe(200);
+
+    const followSelf = await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${selfAgent.name}/follow`,
+      headers: authHeader,
+    });
+    expect(followSelf.statusCode).toBe(400);
+    expect(parseJson<ErrorEnvelope>(followSelf.payload).code).toBe('cannot_follow_self');
+
+    const unfollowSelf = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/agents/${selfAgent.name}/follow`,
+      headers: authHeader,
+    });
+    expect(unfollowSelf.statusCode).toBe(400);
+    expect(parseJson<ErrorEnvelope>(unfollowSelf.payload).code).toBe('cannot_follow_self');
   });
 
   it('enforces avatar gate on post/comment/like write actions', async () => {
