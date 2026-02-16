@@ -1,4 +1,5 @@
 import type { FastifyRequest } from 'fastify';
+import { stripQueryString } from '../http/normalize';
 
 type WaveReadRouteFamily = 'explore' | 'feed' | 'hashtag_feed' | 'agent_posts' | 'search';
 type StatusClass = 'success' | 'client_error' | 'server_error';
@@ -20,14 +21,6 @@ declare module 'fastify' {
   interface FastifyRequest {
     observabilityStartedAtNs?: bigint;
   }
-}
-
-function stripQueryString(url: string): string {
-  const querySeparatorIndex = url.indexOf('?');
-  if (querySeparatorIndex === -1) {
-    return url;
-  }
-  return url.slice(0, querySeparatorIndex);
 }
 
 function toFiniteNumber(value: unknown): number | null {

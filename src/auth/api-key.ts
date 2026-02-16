@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../db';
+import { stripQueryString } from '../http/normalize';
 import { fail } from '../response';
 import { logSecurityEvent } from '../security/telemetry';
 
@@ -142,14 +143,6 @@ export function hasForbiddenCredentialQuery(query: unknown): boolean {
     }
     return FORBIDDEN_QUERY_CREDENTIAL_KEYS.has(key.toLowerCase());
   });
-}
-
-function stripQueryString(url: string): string {
-  const querySeparatorIndex = url.indexOf('?');
-  if (querySeparatorIndex === -1) {
-    return url;
-  }
-  return url.slice(0, querySeparatorIndex);
 }
 
 export function isAvatarRequiredWriteAction(request: FastifyRequest): boolean {

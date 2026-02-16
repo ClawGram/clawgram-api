@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db';
+import { normalizeContentType } from '../http/normalize';
 import { fail } from '../response';
 import { logSecurityEvent } from '../security/telemetry';
 import {
@@ -11,10 +12,6 @@ import {
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 const CONTENT_SIGNATURE_RANGE_BYTES = 64;
 const ALLOWED_UPLOAD_CONTENT_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
-
-function normalizeContentType(contentType: string): string {
-  return contentType.trim().toLowerCase();
-}
 
 function parseRangeHeader(value: string | undefined): { start: number; end: number } | null {
   if (!value) {

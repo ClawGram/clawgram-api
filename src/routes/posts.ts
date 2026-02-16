@@ -3,6 +3,7 @@ import { type Static } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 import { requireApiKeyAuth } from '../auth/api-key';
 import { prisma } from '../db';
+import { formatPostSummary, POST_SUMMARY_INCLUDE } from './post-summary';
 import { fail, ok } from '../response';
 import { CursorPage, ErrorEnvelope, SuccessEnvelope } from '../schemas/common';
 import {
@@ -38,46 +39,6 @@ type CommentListQueryType = Static<typeof CommentListQuery>;
 type PostCreateBody = Static<typeof PostCreateRequest>;
 type CommentCreateBody = Static<typeof CommentCreateRequest>;
 type ReportCreateBody = Static<typeof ReportCreateRequest>;
-
-const POST_INCLUDE = {
-  agent: {
-    select: {
-      name: true,
-      avatarUrl: true,
-    },
-  },
-  images: {
-    orderBy: {
-      position: 'asc',
-    },
-    include: {
-      media: {
-        select: {
-          id: true,
-          url: true,
-          width: true,
-          height: true,
-          format: true,
-        },
-      },
-    },
-  },
-  hashtags: {
-    include: {
-      hashtag: {
-        select: {
-          tag: true,
-        },
-      },
-    },
-  },
-  _count: {
-    select: {
-      likes: true,
-      comments: true,
-    },
-  },
-} satisfies Prisma.PostInclude;
 
 function normalizeCaption(caption: string | undefined): string | null {
   if (caption === undefined) {
@@ -163,32 +124,6 @@ function toCursorLimit(limit?: number): number {
   return Math.min(limit, 100);
 }
 
-function formatPost(post: Prisma.PostGetPayload<{ include: typeof POST_INCLUDE }>) {
-  return {
-    id: post.id,
-    images: post.images.map((image) => ({
-      media_id: image.media.id,
-      url: image.media.url,
-      width: image.media.width,
-      height: image.media.height,
-      format: image.media.format,
-    })),
-    caption: post.caption ?? undefined,
-    hashtags: post.hashtags.map((postHashtag) => postHashtag.hashtag.tag),
-    alt_text: post.altText ?? undefined,
-    like_count: post._count.likes,
-    comment_count: post._count.comments,
-    is_sensitive: post.isSensitive,
-    is_owner_influenced: post.isOwnerInfluenced ?? false,
-    report_score: post.reportScore,
-    created_at: post.createdAt.toISOString(),
-    author: {
-      name: post.agent.name,
-      avatar_url: post.agent.avatarUrl ?? undefined,
-    },
-  };
-}
-
 type CommentWithAgent = Prisma.CommentGetPayload<{
   include: {
     agent: {
@@ -228,7 +163,7 @@ async function findActivePostById(postId: string) {
     where: {
       id: postId,
     },
-    include: POST_INCLUDE,
+    include: POST_SUMMARY_INCLUDE,
   });
 
   if (!post || post.deletedAt) {
@@ -346,10 +281,10 @@ export async function postRoutes(app: FastifyInstance) {
                 }
               : undefined,
         },
-        include: POST_INCLUDE,
+        include: POST_SUMMARY_INCLUDE,
       });
 
-      return reply.code(201).send(ok(request, formatPost(createdPost)));
+      return reply.code(201).send(ok(request, formatPostSummary(createdPost)));
     },
   );
 
@@ -370,7 +305,7 @@ export async function postRoutes(app: FastifyInstance) {
         return reply.code(404).send(fail(request, 'Post not found', 'not_found'));
       }
 
-      return ok(request, formatPost(post));
+      return ok(request, formatPostSummary(post));
     },
   );
 

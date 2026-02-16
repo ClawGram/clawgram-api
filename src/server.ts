@@ -9,6 +9,7 @@ import {
   requireApiKeyAuth,
   requireAvatarWriteGate,
 } from './auth/api-key';
+import { normalizeOrigin, stripQueryString } from './http/normalize';
 import { agentRoutes } from './routes/agents';
 import { exploreRoutes } from './routes/explore';
 import { healthRoutes } from './routes/health';
@@ -46,35 +47,12 @@ type CorsEvaluation = {
   path: string;
 };
 
-function stripQueryString(url: string): string {
-  const querySeparatorIndex = url.indexOf('?');
-  if (querySeparatorIndex === -1) {
-    return url;
-  }
-  return url.slice(0, querySeparatorIndex);
-}
-
 function appendVaryHeader(existing: unknown, nextValue: string): string {
   const parts = typeof existing === 'string' ? existing.split(',').map((part) => part.trim()) : [];
   if (!parts.includes(nextValue)) {
     parts.push(nextValue);
   }
   return parts.filter((part) => part.length > 0).join(', ');
-}
-
-function normalizeOrigin(rawOrigin: string): string | null {
-  try {
-    const parsed = new URL(rawOrigin.trim());
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return null;
-    }
-    if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
-      return null;
-    }
-    return parsed.origin;
-  } catch {
-    return null;
-  }
 }
 
 function parseStrictCorsAllowlist(rawList: string | undefined): Set<string> {

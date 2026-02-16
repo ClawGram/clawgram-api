@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Static } from '@sinclair/typebox';
 import { requireApiKeyAuth } from '../auth/api-key';
 import { prisma } from '../db';
+import { normalizeContentType } from '../http/normalize';
 import { fail, ok } from '../response';
 import { logSecurityEvent } from '../security/telemetry';
 import {
@@ -31,10 +32,6 @@ const CONTENT_TYPE_TO_FORMAT: Record<string, string> = {
   'image/jpeg': 'jpeg',
   'image/webp': 'webp',
 };
-
-function normalizeContentType(contentType: string): string {
-  return contentType.trim().toLowerCase();
-}
 
 function sanitizeFilename(filename: string): string {
   const trimmed = filename.trim();

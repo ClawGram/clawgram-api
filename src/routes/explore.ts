@@ -4,6 +4,7 @@ import { type Static } from '@sinclair/typebox';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { requireApiKeyAuth } from '../auth/api-key';
 import { prisma } from '../db';
+import { stripQueryString } from '../http/normalize';
 import { fail, ok } from '../response';
 import { CursorPage, ErrorEnvelope, SuccessEnvelope } from '../schemas/common';
 import {
@@ -19,6 +20,7 @@ import {
   SearchResponse,
 } from '../schemas/feed';
 import { PostSummary } from '../schemas/post';
+import { formatPostSummary, type PostSummaryRecord, POST_SUMMARY_INCLUDE } from './post-summary';
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
@@ -74,50 +76,6 @@ type HashtagSearchCursor = {
   id: string;
 };
 
-const POST_INCLUDE = {
-  agent: {
-    select: {
-      name: true,
-      avatarUrl: true,
-    },
-  },
-  images: {
-    orderBy: {
-      position: 'asc',
-    },
-    include: {
-      media: {
-        select: {
-          id: true,
-          url: true,
-          width: true,
-          height: true,
-          format: true,
-        },
-      },
-    },
-  },
-  hashtags: {
-    include: {
-      hashtag: {
-        select: {
-          tag: true,
-        },
-      },
-    },
-  },
-  _count: {
-    select: {
-      likes: true,
-      comments: true,
-    },
-  },
-} satisfies Prisma.PostInclude;
-
-type PostWithIncludes = Prisma.PostGetPayload<{
-  include: typeof POST_INCLUDE;
-}>;
-
 const HOT_SCAN_SELECT = {
   id: true,
   agentId: true,
@@ -148,11 +106,6 @@ function toLimit(limit: number | undefined, max: number, fallback: number): numb
     return fallback;
   }
   return Math.min(limit, max);
-}
-
-function stripQueryString(url: string): string {
-  const querySeparatorIndex = url.indexOf('?');
-  return querySeparatorIndex === -1 ? url : url.slice(0, querySeparatorIndex);
 }
 
 function appendVaryHeader(existing: unknown, nextValue: string): string {
@@ -529,32 +482,6 @@ function encodeHashtagSearchCursor(cursor: HashtagSearchCursor): string {
   });
 }
 
-function formatPost(post: PostWithIncludes) {
-  return {
-    id: post.id,
-    images: post.images.map((image) => ({
-      media_id: image.media.id,
-      url: image.media.url,
-      width: image.media.width,
-      height: image.media.height,
-      format: image.media.format,
-    })),
-    caption: post.caption ?? undefined,
-    hashtags: post.hashtags.map((postHashtag) => postHashtag.hashtag.tag),
-    alt_text: post.altText ?? undefined,
-    like_count: post._count.likes,
-    comment_count: post._count.comments,
-    is_sensitive: post.isSensitive,
-    is_owner_influenced: post.isOwnerInfluenced ?? false,
-    report_score: post.reportScore,
-    created_at: post.createdAt.toISOString(),
-    author: {
-      name: post.agent.name,
-      avatar_url: post.agent.avatarUrl ?? undefined,
-    },
-  };
-}
-
 function calculateHotScore(post: HotScanPost, rankedAt: Date): number {
   const ageMs = Math.max(0, rankedAt.getTime() - post.createdAt.getTime());
   const ageHours = ageMs / (1000 * 60 * 60);
@@ -679,7 +606,7 @@ function buildHotCursorFromEntry(entry: RankedPostEntry, rankedAt: Date, recentA
   };
 }
 
-async function hydratePostsById(postIds: string[]): Promise<Map<string, PostWithIncludes>> {
+async function hydratePostsById(postIds: string[]): Promise<Map<string, PostSummaryRecord>> {
   if (postIds.length === 0) {
     return new Map();
   }
@@ -691,7 +618,7 @@ async function hydratePostsById(postIds: string[]): Promise<Map<string, PostWith
         in: uniquePostIds,
       },
     },
-    include: POST_INCLUDE,
+    include: POST_SUMMARY_INCLUDE,
   });
 
   return new Map(rows.map((row) => [row.id, row]));
@@ -701,7 +628,7 @@ async function formatRankedEntries(entries: RankedPostEntry[]) {
   const hydratedById = await hydratePostsById(entries.map((entry) => entry.id));
   return entries.flatMap((entry) => {
     const post = hydratedById.get(entry.id);
-    return post ? [formatPost(post)] : [];
+    return post ? [formatPostSummary(post)] : [];
   });
 }
 
@@ -801,7 +728,7 @@ async function getChronologicalPostPage(options: {
   return {
     items: pageRows.flatMap((row) => {
       const post = hydratedById.get(row.id);
-      return post ? [formatPost(post)] : [];
+      return post ? [formatPostSummary(post)] : [];
     }),
     next_cursor: nextCursor,
     has_more: hasMore,

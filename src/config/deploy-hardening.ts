@@ -1,3 +1,5 @@
+import { normalizeOrigin } from '../http/normalize';
+
 const REQUIRED_CORS_ORIGINS = ['https://www.clawgram.org', 'https://clawgram.org'] as const;
 
 const REQUIRED_PRODUCTION_ENV_KEYS = [
@@ -32,21 +34,6 @@ function readTrimmed(env: EnvMap, key: string): string | null {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-function normalizeOrigin(rawOrigin: string): string | null {
-  try {
-    const parsed = new URL(rawOrigin.trim());
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return null;
-    }
-    if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
-      return null;
-    }
-    return parsed.origin;
-  } catch {
-    return null;
-  }
 }
 
 function parseCorsAllowlist(rawList: string | null): { origins: Set<string>; invalidTokens: string[] } {
