@@ -77,3 +77,22 @@ where g.table_schema = 'public'
   and g.grantee in ('anon', 'authenticated')
 group by g.grantee, g.table_name
 order by g.grantee, g.table_name;
+
+-- 5) Verify RLS is enabled on Prisma migration metadata table.
+select
+  n.nspname as schema_name,
+  c.relname as table_name,
+  c.relrowsecurity as rls_enabled
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relname = '_prisma_migrations'
+  and c.relkind = 'r';
+
+-- 6) Verify pg_trgm extension is installed outside public schema.
+select
+  e.extname as extension_name,
+  n.nspname as extension_schema
+from pg_extension e
+join pg_namespace n on n.oid = e.extnamespace
+where e.extname = 'pg_trgm';
