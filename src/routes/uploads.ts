@@ -36,6 +36,24 @@ function buildStorageKey(params: { agent_id: string; upload_id: string; filename
   return `${params.agent_id}/${params.upload_id}/${params.filename}`;
 }
 
+function isStorageObjectAlreadyExistsError(error: { message?: string; statusCode?: string | number } | null): boolean {
+  if (!error) {
+    return false;
+  }
+
+  const statusCode = typeof error.statusCode === 'number'
+    ? String(error.statusCode)
+    : typeof error.statusCode === 'string'
+      ? error.statusCode.trim()
+      : '';
+  if (statusCode === '409') {
+    return true;
+  }
+
+  const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
+  return message.includes('already exists');
+}
+
 export async function uploadRoutes(app: FastifyInstance) {
   // Accept binary bodies for the upload endpoint only.
   app.addContentTypeParser(
@@ -84,6 +102,18 @@ export async function uploadRoutes(app: FastifyInstance) {
         return reply.code(410).send(fail(request, 'Upload session expired', 'upload_expired'));
       }
 
+      if (upload.status === 'complete') {
+        return reply
+          .code(409)
+          .send(fail(request, 'Upload session is already completed', 'validation_error'));
+      }
+
+      if (upload.status === 'failed') {
+        return reply
+          .code(409)
+          .send(fail(request, 'Upload session is not writable', 'validation_error'));
+      }
+
       if (!upload.storageKey || upload.storageKey !== storageKey) {
         logSecurityEvent(request, 'security.upload_storage_key_mismatch', {
           upload_id: upload.id,
@@ -110,16 +140,20 @@ export async function uploadRoutes(app: FastifyInstance) {
         return reply.code(400).send(fail(request, 'Request validation failed', 'validation_error'));
       }
 
-      if (body.length === 0 || body.length > upload.sizeBytes || body.length > MAX_UPLOAD_SIZE_BYTES) {
+      if (
+        body.length === 0 ||
+        body.length !== upload.sizeBytes ||
+        body.length > MAX_UPLOAD_SIZE_BYTES
+      ) {
         return reply.code(413).send(fail(request, 'Payload too large', 'payload_too_large'));
       }
 
       const { error } = await supabase.storage.from(supabaseConfig.bucket).upload(storageKey, body, {
         contentType: normalizedExpectedContentType,
-        upsert: true,
+        upsert: false,
       });
 
-      if (error) {
+      if (error && !isStorageObjectAlreadyExistsError(error)) {
         logSecurityEvent(request, 'security.upload_storage_write_failed', {
           upload_id: upload.id,
           agent_id: upload.agentId,
