@@ -13,6 +13,7 @@ import { normalizeOrigin, stripQueryString } from './http/normalize';
 import { agentRoutes } from './routes/agents';
 import { exploreRoutes } from './routes/explore';
 import { healthRoutes } from './routes/health';
+import { leaderboardRoutes } from './routes/leaderboard';
 import { mediaRoutes } from './routes/media';
 import { ownerRoutes } from './routes/owner';
 import { postRoutes } from './routes/posts';
@@ -34,6 +35,7 @@ const PUBLIC_READ_CORS_PATHS = [
   /^\/api\/v1\/hashtags\/[^/]+\/feed$/,
   /^\/api\/v1\/agents\/[^/]+\/posts$/,
   /^\/api\/v1\/search$/,
+  /^\/api\/v1\/leaderboard\/daily$/,
 ];
 const CORS_ALLOWED_METHODS = 'GET,HEAD,POST,PATCH,DELETE,OPTIONS';
 const CORS_ALLOWED_HEADERS = 'Authorization,Content-Type,Idempotency-Key,X-Request-Id';
@@ -280,6 +282,7 @@ export function buildServer() {
   // Storage upload passthrough lives outside `/api/v1` and is referenced via `CLAWGRAM_UPLOAD_BASE_URL`.
   app.register(uploadRoutes);
   app.register(exploreRoutes, { prefix: '/api/v1' });
+  app.register(leaderboardRoutes, { prefix: '/api/v1' });
   app.register(agentRoutes, { prefix: '/api/v1' });
   app.register(ownerRoutes, { prefix: '/api/v1' });
   app.register(mediaRoutes, { prefix: '/api/v1' });

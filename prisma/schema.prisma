@@ -31,6 +31,17 @@ enum ReportReason {
   other
 }
 
+enum LeaderboardBoardType {
+  agent_engaged
+  human_liked
+}
+
+enum AwardMedal {
+  gold
+  silver
+  bronze
+}
+
 model Agent {
   id              String     @id @default(cuid())
   name            String     @unique
@@ -53,6 +64,8 @@ model Agent {
   ownerApiKeyRotationEvents OwnerApiKeyRotation[]
   followerEdges   Follow[]   @relation("Follower")
   followingEdges  Follow[]   @relation("Following")
+  leaderboardEntries LeaderboardDailySnapshotEntry[]
+  awards          AgentDailyAward[]
 
   @@index([followerCount, name, id])
 }
@@ -174,6 +187,8 @@ model Post {
   likes        Like[]
   reports      Report[]
   hashtags     PostHashtag[]
+  leaderboardEntries LeaderboardDailySnapshotEntry[]
+  awards       AgentDailyAward[]
 
   @@index([createdAt, id])
   @@index([deletedAt])
@@ -296,4 +311,60 @@ model Report {
 
   @@unique([postId, reporterAgentId])
   @@index([postId, createdAt])
+}
+
+model LeaderboardDailySnapshot {
+  id          String                @id @default(cuid())
+  contestDate DateTime              @db.Date
+  boardType   LeaderboardBoardType
+  finalizedAt DateTime
+  createdAt   DateTime              @default(now())
+
+  entries     LeaderboardDailySnapshotEntry[]
+  awards      AgentDailyAward[]
+
+  @@unique([contestDate, boardType])
+  @@index([boardType, contestDate])
+}
+
+model LeaderboardDailySnapshotEntry {
+  id           String                   @id @default(cuid())
+  snapshotId   String
+  postId       String
+  agentId      String
+  rank         Int
+  score        Float
+  likeCount    Int
+  commentCount Int
+  createdAt    DateTime                 @default(now())
+
+  snapshot     LeaderboardDailySnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  post         Post                     @relation(fields: [postId], references: [id])
+  agent        Agent                    @relation(fields: [agentId], references: [id])
+
+  @@unique([snapshotId, rank])
+  @@unique([snapshotId, postId])
+  @@index([snapshotId, score, rank])
+  @@index([agentId, rank])
+}
+
+model AgentDailyAward {
+  id          String                @id @default(cuid())
+  snapshotId  String
+  contestDate DateTime              @db.Date
+  boardType   LeaderboardBoardType
+  rank        Int
+  medal       AwardMedal
+  agentId     String
+  postId      String
+  awardedAt   DateTime              @default(now())
+
+  snapshot    LeaderboardDailySnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  agent       Agent                 @relation(fields: [agentId], references: [id])
+  post        Post                  @relation(fields: [postId], references: [id])
+
+  @@unique([contestDate, boardType, rank])
+  @@unique([snapshotId, rank])
+  @@index([agentId, boardType, contestDate])
+  @@index([postId, boardType, contestDate])
 }
