@@ -282,46 +282,96 @@ describe('contract: daily leaderboard snapshots', () => {
     await app.close();
   });
 
-  it('persists a full finalized snapshot even when first request asks for a small limit', async () => {
+  it('returns finalized data from persisted snapshot without recomputing scores', async () => {
     vi.setSystemTime(new Date('2026-02-19T01:00:00.000Z'));
 
-    const first = await app.inject({
+    snapshots.push({
+      id: 'snapshot_1',
+      contestDate: new Date('2026-02-16T00:00:00.000Z'),
+      boardType: 'agent_engaged',
+      finalizedAt: new Date('2026-02-18T00:00:05.000Z'),
+    });
+    snapshotEntries.push(
+      {
+        snapshotId: 'snapshot_1',
+        postId: 'post_a',
+        agentId: 'agent_a',
+        rank: 1,
+        score: 20,
+        likeCount: 12,
+        commentCount: 4,
+      },
+      {
+        snapshotId: 'snapshot_1',
+        postId: 'post_b',
+        agentId: 'agent_b',
+        rank: 2,
+        score: 18,
+        likeCount: 10,
+        commentCount: 4,
+      },
+      {
+        snapshotId: 'snapshot_1',
+        postId: 'post_c',
+        agentId: 'agent_c',
+        rank: 3,
+        score: 15,
+        likeCount: 7,
+        commentCount: 4,
+      },
+    );
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/leaderboard/daily?date=2026-02-16&limit=2',
+    });
+    expect(response.statusCode).toBe(200);
+
+    const body = parseJson<{
+      success: true;
+      data: {
+        status: 'finalized';
+        items: Array<{ rank: number }>;
+      };
+    }>(response.payload);
+    expect(body.data.status).toBe('finalized');
+    expect(body.data.items).toHaveLength(2);
+    expect(body.data.items.map((item) => item.rank)).toEqual([1, 2]);
+
+    expect(prismaMocks.queryRaw).not.toHaveBeenCalled();
+    expect(prismaMocks.transaction).not.toHaveBeenCalled();
+    expect(prismaMocks.leaderboardDailySnapshotCreate).not.toHaveBeenCalled();
+    expect(prismaMocks.leaderboardDailySnapshotEntryCreateMany).not.toHaveBeenCalled();
+    expect(prismaMocks.agentDailyAwardCreateMany).not.toHaveBeenCalled();
+  });
+
+  it('returns provisional data when snapshot is missing and performs no write-side effects', async () => {
+    vi.setSystemTime(new Date('2026-02-19T01:00:00.000Z'));
+
+    const response = await app.inject({
       method: 'GET',
       url: '/api/v1/leaderboard/daily?date=2026-02-16&limit=1',
     });
-    expect(first.statusCode).toBe(200);
+    expect(response.statusCode).toBe(200);
 
-    const firstBody = parseJson<{
+    const body = parseJson<{
       success: true;
       data: {
-        status: 'finalized';
+        status: 'provisional';
         items: Array<{ rank: number }>;
       };
-    }>(first.payload);
-    expect(firstBody.data.status).toBe('finalized');
-    expect(firstBody.data.items).toHaveLength(1);
-
-    expect(snapshotEntries).toHaveLength(5);
-    expect(awards).toHaveLength(3);
-
-    const second = await app.inject({
-      method: 'GET',
-      url: '/api/v1/leaderboard/daily?date=2026-02-16&limit=5',
-    });
-    expect(second.statusCode).toBe(200);
-
-    const secondBody = parseJson<{
-      success: true;
-      data: {
-        status: 'finalized';
-        items: Array<{ rank: number }>;
-      };
-    }>(second.payload);
-    expect(secondBody.data.items).toHaveLength(5);
-    expect(secondBody.data.items.map((item) => item.rank)).toEqual([1, 2, 3, 4, 5]);
+    }>(response.payload);
+    expect(body.data.status).toBe('provisional');
+    expect(body.data.items).toHaveLength(1);
+    expect(body.data.items.map((item) => item.rank)).toEqual([1]);
 
     expect(prismaMocks.queryRaw).toHaveBeenCalledTimes(1);
-    expect(snapshots).toHaveLength(1);
+    expect(prismaMocks.transaction).not.toHaveBeenCalled();
+    expect(prismaMocks.leaderboardDailySnapshotCreate).not.toHaveBeenCalled();
+    expect(prismaMocks.leaderboardDailySnapshotEntryCreateMany).not.toHaveBeenCalled();
+    expect(prismaMocks.agentDailyAwardCreateMany).not.toHaveBeenCalled();
+    expect(snapshotEntries).toHaveLength(0);
+    expect(awards).toHaveLength(0);
   });
 
   it('returns validation_error for unsupported board value until human leaderboard is implemented', async () => {

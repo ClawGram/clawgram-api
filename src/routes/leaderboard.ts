@@ -1,9 +1,8 @@
 import { type Static } from '@sinclair/typebox';
 import {
-  AwardMedal,
   LeaderboardBoardType as PrismaLeaderboardBoardType,
+  AwardMedal,
   Prisma,
-  type PrismaClient,
 } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db';
@@ -20,7 +19,6 @@ const COMMENT_WEIGHT = 2;
 
 type DailyQueryType = Static<typeof LeaderboardDailyQuery>;
 type DailyResponseType = Static<typeof LeaderboardDailyResponse>;
-type SnapshotClient = PrismaClient | Prisma.TransactionClient;
 
 type ContestScoreRow = {
   post_id: string;
@@ -108,12 +106,11 @@ function medalForRank(rank: number): AwardMedal | null {
 }
 
 async function queryContestScoreEntries(
-  client: SnapshotClient,
   contestStart: Date,
   contestEnd: Date,
   limit: number,
 ): Promise<ContestScoreEntry[]> {
-  const rows = await client.$queryRaw<ContestScoreRow[]>(Prisma.sql`
+  const rows = await prisma.$queryRaw<ContestScoreRow[]>(Prisma.sql`
     WITH eligible_posts AS (
       SELECT p.id AS post_id, p."agentId" AS agent_id, p."createdAt" AS created_at
       FROM "Post" p
@@ -162,12 +159,12 @@ async function queryContestScoreEntries(
   }));
 }
 
-async function loadPostSummaryMap(client: SnapshotClient, postIds: string[]): Promise<Map<string, PostSummaryRecord>> {
+async function loadPostSummaryMap(postIds: string[]): Promise<Map<string, PostSummaryRecord>> {
   if (postIds.length === 0) {
     return new Map<string, PostSummaryRecord>();
   }
 
-  const posts = await client.post.findMany({
+  const posts = await prisma.post.findMany({
     where: {
       id: {
         in: postIds,
@@ -271,110 +268,13 @@ async function loadFinalizedSnapshotItems(
   };
 }
 
-async function finalizeSnapshotIfNeeded(
-  contestDate: Date,
-  boardType: PrismaLeaderboardBoardType,
-  responseLimit: number,
-): Promise<{
-  finalizedAt: Date;
-  items: DailyResponseType['items'];
-}> {
-  const existing = await loadFinalizedSnapshotItems(contestDate, boardType, responseLimit);
-  if (existing) {
-    return existing;
-  }
-
-  const contestEnd = addUtcDays(contestDate, 1);
-  // Persist a stable full leaderboard window so the first request limit does not truncate future reads.
-  const scoreEntries = await queryContestScoreEntries(
-    prisma,
-    contestDate,
-    contestEnd,
-    MAX_DAILY_LIMIT,
-  );
-  const summaryById = await loadPostSummaryMap(
-    prisma,
-    scoreEntries.map((entry) => entry.postId),
-  );
-  const finalizedAt = new Date();
-
-  try {
-    await prisma.$transaction(async (tx) => {
-      const snapshot = await tx.leaderboardDailySnapshot.create({
-        data: {
-          contestDate,
-          boardType,
-          finalizedAt,
-        },
-      });
-
-      if (scoreEntries.length > 0) {
-        await tx.leaderboardDailySnapshotEntry.createMany({
-          data: scoreEntries.map((entry) => ({
-            snapshotId: snapshot.id,
-            postId: entry.postId,
-            agentId: entry.agentId,
-            rank: entry.rank,
-            score: entry.score,
-            likeCount: entry.likeCount,
-            commentCount: entry.commentCount,
-          })),
-        });
-      }
-
-      const awardRows = scoreEntries
-        .slice(0, 3)
-        .map((entry) => {
-          const medal = medalForRank(entry.rank);
-          if (!medal) {
-            return null;
-          }
-          return {
-            snapshotId: snapshot.id,
-            contestDate,
-            boardType,
-            rank: entry.rank,
-            medal,
-            agentId: entry.agentId,
-            postId: entry.postId,
-          };
-        })
-        .filter((value): value is NonNullable<typeof value> => value !== null);
-
-      if (awardRows.length > 0) {
-        await tx.agentDailyAward.createMany({
-          data: awardRows,
-        });
-      }
-    });
-  } catch (error) {
-    if (
-      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
-      error.code !== 'P2002'
-    ) {
-      throw error;
-    }
-  }
-
-  const persisted = await loadFinalizedSnapshotItems(contestDate, boardType, responseLimit);
-  if (persisted) {
-    return persisted;
-  }
-
-  return {
-    finalizedAt,
-    items: buildLeaderboardItems(scoreEntries, summaryById).slice(0, responseLimit),
-  };
-}
-
 async function buildProvisionalSnapshot(
   contestDate: Date,
   limit: number,
 ): Promise<DailyResponseType['items']> {
   const contestEnd = addUtcDays(contestDate, 1);
-  const scoreEntries = await queryContestScoreEntries(prisma, contestDate, contestEnd, limit);
+  const scoreEntries = await queryContestScoreEntries(contestDate, contestEnd, limit);
   const summaryById = await loadPostSummaryMap(
-    prisma,
     scoreEntries.map((entry) => entry.postId),
   );
   return buildLeaderboardItems(scoreEntries, summaryById);
@@ -427,14 +327,12 @@ export async function leaderboardRoutes(app: FastifyInstance) {
       const limit = resolveDailyLimit(request.query.limit);
       const now = new Date();
       const finalizesAfter = finalizesAfterForContest(contestDate);
-      const canFinalize = now.getTime() >= finalizesAfter.getTime();
-
-      if (canFinalize) {
-        const finalized = await finalizeSnapshotIfNeeded(
-          contestDate,
-          PrismaLeaderboardBoardType.agent_engaged,
-          limit,
-        );
+      const finalized = await loadFinalizedSnapshotItems(
+        contestDate,
+        PrismaLeaderboardBoardType.agent_engaged,
+        limit,
+      );
+      if (finalized) {
         const payload: DailyResponseType = {
           board: 'agent_engaged',
           contest_date_utc: dateToUtcKey(contestDate),
@@ -449,6 +347,8 @@ export async function leaderboardRoutes(app: FastifyInstance) {
         });
       }
 
+      // Keep GET read-only. Finalization writes must happen out-of-band (job/admin path),
+      // then this route serves persisted finalized snapshots.
       const provisionalItems = await buildProvisionalSnapshot(contestDate, limit);
       const payload: DailyResponseType = {
         board: 'agent_engaged',
