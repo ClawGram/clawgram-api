@@ -41,6 +41,14 @@ export const OWNER_EMAIL_START_RATE_LIMIT_WINDOW_MS = toPositiveInt(
   process.env.OWNER_EMAIL_START_RATE_LIMIT_WINDOW_MS,
   10 * 60 * 1000,
 );
+export const OWNER_EMAIL_START_BUCKET_MAX_KEYS = toPositiveInt(
+  process.env.OWNER_EMAIL_START_BUCKET_MAX_KEYS,
+  10_000,
+);
+export const OWNER_EMAIL_START_BUCKET_PRUNE_INTERVAL_MS = toPositiveInt(
+  process.env.OWNER_EMAIL_START_BUCKET_PRUNE_INTERVAL_MS,
+  60 * 1000,
+);
 
 export type OwnerEmailStartBody = Static<typeof OwnerEmailStartRequest>;
 export type OwnerEmailCompleteBody = Static<typeof OwnerEmailCompleteRequest>;
@@ -61,6 +69,50 @@ type RateLimitResult = {
 };
 
 const ownerEmailStartBuckets = new Map<string, RateLimitBucket>();
+let ownerEmailStartNextPruneAtMs = 0;
+
+function setOwnerEmailStartBucket(key: string, bucket: RateLimitBucket) {
+  if (ownerEmailStartBuckets.has(key)) {
+    ownerEmailStartBuckets.delete(key);
+  }
+  ownerEmailStartBuckets.set(key, bucket);
+}
+
+function pruneOwnerEmailStartBuckets(nowMs: number) {
+  for (const [bucketKey, bucket] of ownerEmailStartBuckets) {
+    if (bucket.resetAtMs <= nowMs) {
+      ownerEmailStartBuckets.delete(bucketKey);
+    }
+  }
+
+  while (ownerEmailStartBuckets.size > OWNER_EMAIL_START_BUCKET_MAX_KEYS) {
+    const oldestKey = ownerEmailStartBuckets.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    ownerEmailStartBuckets.delete(oldestKey);
+  }
+
+  ownerEmailStartNextPruneAtMs = nowMs + OWNER_EMAIL_START_BUCKET_PRUNE_INTERVAL_MS;
+}
+
+function maybePruneOwnerEmailStartBuckets(nowMs: number) {
+  if (
+    ownerEmailStartBuckets.size >= OWNER_EMAIL_START_BUCKET_MAX_KEYS ||
+    nowMs >= ownerEmailStartNextPruneAtMs
+  ) {
+    pruneOwnerEmailStartBuckets(nowMs);
+  }
+}
+
+export function resetOwnerEmailStartRateLimitStateForTest() {
+  ownerEmailStartBuckets.clear();
+  ownerEmailStartNextPruneAtMs = 0;
+}
+
+export function ownerEmailStartRateLimitBucketCountForTest() {
+  return ownerEmailStartBuckets.size;
+}
 
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -84,10 +136,13 @@ export function consumeRateLimitKey(
   windowMs: number,
   nowMs: number,
 ): RateLimitResult {
+  maybePruneOwnerEmailStartBuckets(nowMs);
+
   const current = ownerEmailStartBuckets.get(key);
-  const resetAtMs = current && current.resetAtMs > nowMs ? current.resetAtMs : nowMs + windowMs;
+  const hasActiveBucket = !!current && current.resetAtMs > nowMs;
+  const resetAtMs = hasActiveBucket ? current.resetAtMs : nowMs + windowMs;
   const bucket: RateLimitBucket =
-    current && current.resetAtMs > nowMs
+    hasActiveBucket
       ? current
       : {
           count: 0,
@@ -96,7 +151,7 @@ export function consumeRateLimitKey(
 
   if (bucket.count >= limit) {
     const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAtMs - nowMs) / 1000));
-    ownerEmailStartBuckets.set(key, bucket);
+    setOwnerEmailStartBucket(key, bucket);
     return {
       limited: true,
       limit,
@@ -107,7 +162,11 @@ export function consumeRateLimitKey(
   }
 
   bucket.count += 1;
-  ownerEmailStartBuckets.set(key, bucket);
+  setOwnerEmailStartBucket(key, bucket);
+  if (ownerEmailStartBuckets.size > OWNER_EMAIL_START_BUCKET_MAX_KEYS) {
+    pruneOwnerEmailStartBuckets(nowMs);
+  }
+
   return {
     limited: false,
     limit,
