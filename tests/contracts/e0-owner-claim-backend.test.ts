@@ -3,6 +3,11 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashApiKey } from '../../src/auth/api-key';
 import { hashOwnerToken } from '../../src/auth/owner';
+import {
+  OWNER_EMAIL_COMPLETE_LIMIT_PER_IP,
+  OWNER_EMAIL_COMPLETE_LIMIT_PER_TOKEN,
+  resetOwnerEmailStartRateLimitStateForTest,
+} from '../../src/routes/owner-shared';
 import { parseJson } from './helpers/contract-test-helpers';
 
 const transportState = vi.hoisted(() => ({
@@ -133,6 +138,7 @@ describe('contract: E0 owner claim backend', () => {
     vi.clearAllMocks();
     transportState.deliveries.length = 0;
     sequence = 0;
+    resetOwnerEmailStartRateLimitStateForTest();
 
     ownersByEmail.clear();
     ownersById.clear();
@@ -605,6 +611,51 @@ describe('contract: E0 owner claim backend', () => {
     expect(replay.statusCode).toBe(409);
     expect(parseJson<ErrorEnvelope>(replay.payload).code).toBe('owner_token_consumed');
     expect(apiKeysByAgentId.get('agent_other')?.status).toBe('claimed');
+  });
+
+  it('rate limits owner email completion attempts per token fingerprint', async () => {
+    for (let attempt = 0; attempt < OWNER_EMAIL_COMPLETE_LIMIT_PER_TOKEN; attempt += 1) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/owner/email/complete',
+        payload: { token: 'claw_owner_email_invalid_fixed' },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(parseJson<ErrorEnvelope>(response.payload).code).toBe('invalid_owner_token');
+    }
+
+    const limited = await app.inject({
+      method: 'POST',
+      url: '/api/v1/owner/email/complete',
+      payload: { token: 'claw_owner_email_invalid_fixed' },
+    });
+
+    expect(limited.statusCode).toBe(429);
+    expect(parseJson<ErrorEnvelope>(limited.payload).code).toBe('rate_limited');
+    expect(limited.headers['ratelimit-limit']).toBeDefined();
+    expect(limited.headers['ratelimit-remaining']).toBe('0');
+    expect(limited.headers['retry-after']).toBeDefined();
+  });
+
+  it('rate limits owner email completion attempts per ip across many tokens', async () => {
+    for (let attempt = 0; attempt < OWNER_EMAIL_COMPLETE_LIMIT_PER_IP; attempt += 1) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/owner/email/complete',
+        payload: { token: `claw_owner_email_invalid_${attempt}` },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(parseJson<ErrorEnvelope>(response.payload).code).toBe('invalid_owner_token');
+    }
+
+    const limited = await app.inject({
+      method: 'POST',
+      url: '/api/v1/owner/email/complete',
+      payload: { token: 'claw_owner_email_invalid_ip_limit' },
+    });
+
+    expect(limited.statusCode).toBe(429);
+    expect(parseJson<ErrorEnvelope>(limited.payload).code).toBe('rate_limited');
   });
 
   it('allows owner to rotate API key for owned agent', async () => {

@@ -116,6 +116,8 @@ paths:
           $ref: '#/components/responses/OwnerEmailCompleteRead'
         '400':
           $ref: '#/components/responses/BadRequestError'
+        '429':
+          $ref: '#/components/responses/RateLimitedError'
         '409':
           $ref: '#/components/responses/ConflictError'
   /owner/me:

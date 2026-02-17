@@ -20,6 +20,9 @@ import {
   hashPresentedOwnerToken,
   issueOwnerEmailToken,
   normalizeEmail,
+  OWNER_EMAIL_COMPLETE_LIMIT_PER_IP,
+  OWNER_EMAIL_COMPLETE_LIMIT_PER_TOKEN,
+  OWNER_EMAIL_COMPLETE_RATE_LIMIT_WINDOW_MS,
   OWNER_EMAIL_START_LIMIT_PER_EMAIL,
   OWNER_EMAIL_START_LIMIT_PER_IP,
   OWNER_EMAIL_START_RATE_LIMIT_WINDOW_MS,
@@ -110,11 +113,34 @@ export async function registerOwnerEmailRoutes(app: FastifyInstance) {
           400: ErrorEnvelope,
           401: ErrorEnvelope,
           409: ErrorEnvelope,
+          429: ErrorEnvelope,
         },
       },
     },
     async (request, reply) => {
+      const nowMs = Date.now();
       const tokenHash = hashPresentedOwnerToken(request.body.token);
+      const tokenRateLimit = consumeRateLimitKey(
+        `owner-email-complete:token:${tokenHash}`,
+        OWNER_EMAIL_COMPLETE_LIMIT_PER_TOKEN,
+        OWNER_EMAIL_COMPLETE_RATE_LIMIT_WINDOW_MS,
+        nowMs,
+      );
+      const ipRateLimit = consumeRateLimitKey(
+        `owner-email-complete:ip:${request.ip}`,
+        OWNER_EMAIL_COMPLETE_LIMIT_PER_IP,
+        OWNER_EMAIL_COMPLETE_RATE_LIMIT_WINDOW_MS,
+        nowMs,
+      );
+
+      const appliedLimit = tokenRateLimit.limited ? tokenRateLimit : ipRateLimit;
+      applyRateLimitHeaders(reply, appliedLimit);
+      if (tokenRateLimit.limited || ipRateLimit.limited) {
+        return reply
+          .code(429)
+          .send(fail(request, 'Too many owner email completion attempts', 'rate_limited', 'Try again later'));
+      }
+
       const tokenRecord = await prisma.ownerEmailToken.findUnique({
         where: {
           tokenHash,

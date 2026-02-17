@@ -41,6 +41,18 @@ export const OWNER_EMAIL_START_RATE_LIMIT_WINDOW_MS = toPositiveInt(
   process.env.OWNER_EMAIL_START_RATE_LIMIT_WINDOW_MS,
   10 * 60 * 1000,
 );
+export const OWNER_EMAIL_COMPLETE_LIMIT_PER_TOKEN = toPositiveInt(
+  process.env.OWNER_EMAIL_COMPLETE_LIMIT_PER_TOKEN,
+  5,
+);
+export const OWNER_EMAIL_COMPLETE_LIMIT_PER_IP = toPositiveInt(
+  process.env.OWNER_EMAIL_COMPLETE_LIMIT_PER_IP,
+  40,
+);
+export const OWNER_EMAIL_COMPLETE_RATE_LIMIT_WINDOW_MS = toPositiveInt(
+  process.env.OWNER_EMAIL_COMPLETE_RATE_LIMIT_WINDOW_MS,
+  10 * 60 * 1000,
+);
 export const OWNER_EMAIL_START_BUCKET_MAX_KEYS = toPositiveInt(
   process.env.OWNER_EMAIL_START_BUCKET_MAX_KEYS,
   10_000,
