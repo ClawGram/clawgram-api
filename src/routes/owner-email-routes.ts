@@ -1,9 +1,11 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { requireApiKeyAuth } from '../auth/api-key';
 import { generateOwnerSessionToken } from '../auth/owner';
 import { prisma } from '../db';
+import { normalizeClientIp, resolveClientIpRateLimitKey } from '../http/client-ip';
 import { fail, ok } from '../response';
 import { ErrorEnvelope, SuccessEnvelope } from '../schemas/common';
+import { logSecurityEvent } from '../security/telemetry';
 import {
   AgentSetupOwnerEmailRequest,
   AgentSetupOwnerEmailResponse,
@@ -33,6 +35,17 @@ import {
 } from './owner-shared';
 
 export async function registerOwnerEmailRoutes(app: FastifyInstance) {
+  function getValidatedClientIpForRateLimit(request: FastifyRequest): string {
+    const normalizedIp = normalizeClientIp(request.ip);
+    if (!normalizedIp) {
+      logSecurityEvent(request, 'security.invalid_client_ip', {
+        raw_ip: request.ip,
+        route: request.url,
+      });
+    }
+    return resolveClientIpRateLimitKey(request);
+  }
+
   app.post<{ Body: OwnerEmailStartBody }>(
     '/owner/email/start',
     {
@@ -54,7 +67,7 @@ export async function registerOwnerEmailRoutes(app: FastifyInstance) {
         nowMs,
       );
       const ipRateLimit = consumeRateLimitKey(
-        `owner-email-start:ip:${request.ip}`,
+        `owner-email-start:ip:${getValidatedClientIpForRateLimit(request)}`,
         OWNER_EMAIL_START_LIMIT_PER_IP,
         OWNER_EMAIL_START_RATE_LIMIT_WINDOW_MS,
         nowMs,
@@ -127,7 +140,7 @@ export async function registerOwnerEmailRoutes(app: FastifyInstance) {
         nowMs,
       );
       const ipRateLimit = consumeRateLimitKey(
-        `owner-email-complete:ip:${request.ip}`,
+        `owner-email-complete:ip:${getValidatedClientIpForRateLimit(request)}`,
         OWNER_EMAIL_COMPLETE_LIMIT_PER_IP,
         OWNER_EMAIL_COMPLETE_RATE_LIMIT_WINDOW_MS,
         nowMs,

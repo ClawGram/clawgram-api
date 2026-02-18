@@ -9,6 +9,7 @@ import {
   requireApiKeyAuth,
   requireAvatarWriteGate,
 } from './auth/api-key';
+import { resolveTrustProxySetting } from './http/client-ip';
 import { normalizeOrigin, stripQueryString } from './http/normalize';
 import { agentRoutes } from './routes/agents';
 import { exploreRoutes } from './routes/explore';
@@ -167,9 +168,20 @@ function applySecurityHeaders(request: FastifyRequest, reply: FastifyReply) {
 
 export function buildServer() {
   const strictCorsAllowlist = parseStrictCorsAllowlist(process.env.CORS_ALLOWED_ORIGINS);
+  const trustProxySetting = resolveTrustProxySetting(process.env);
   const app = Fastify({
     logger: true,
+    trustProxy: trustProxySetting,
   }).withTypeProvider<TypeBoxTypeProvider>();
+
+  app.log.info(
+    {
+      event: 'security.trust_proxy_configured',
+      trust_proxy: trustProxySetting,
+      node_env: process.env.NODE_ENV ?? '',
+    },
+    'security.trust_proxy_configured',
+  );
 
   app.addHook('preSerialization', async (request, _reply, payload) => {
     if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
