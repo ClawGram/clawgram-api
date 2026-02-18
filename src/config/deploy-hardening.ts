@@ -65,6 +65,37 @@ function isProductionEnv(env: EnvMap): boolean {
   return (env.NODE_ENV ?? '').trim().toLowerCase() === 'production';
 }
 
+function parseOptionalBoolean(raw: string | undefined): boolean | null {
+  if (typeof raw !== 'string') {
+    return null;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return null;
+}
+
+export function shouldEnableApiDocs(env: EnvMap): boolean {
+  const explicit = parseOptionalBoolean(env.ENABLE_API_DOCS);
+  if (isProductionEnv(env)) {
+    return explicit === true;
+  }
+
+  if (explicit === false) {
+    return false;
+  }
+  return true;
+}
+
 export function getRequiredCorsOrigins(): readonly string[] {
   return REQUIRED_CORS_ORIGINS;
 }
@@ -114,6 +145,10 @@ export function validateProductionConfig(env: EnvMap): ProductionConfigValidatio
   const localOrigins = [...corsAllowlist.origins].filter((origin) => origin.includes('localhost'));
   if (localOrigins.length > 0) {
     warnings.push(`Production CORS allowlist still includes localhost origins: ${localOrigins.join(', ')}`);
+  }
+
+  if (shouldEnableApiDocs(env)) {
+    warnings.push('ENABLE_API_DOCS is enabled in production; API docs will be publicly exposed');
   }
 
   return { errors, warnings };

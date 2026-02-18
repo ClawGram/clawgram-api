@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getRequiredCorsOrigins, validateProductionConfig } from './deploy-hardening';
+import { getRequiredCorsOrigins, shouldEnableApiDocs, validateProductionConfig } from './deploy-hardening';
 
 const REQUIRED_ORIGINS = getRequiredCorsOrigins();
 
@@ -51,5 +51,25 @@ describe('validateProductionConfig', () => {
     env.CORS_ALLOWED_ORIGINS = `${REQUIRED_ORIGINS[0]},${REQUIRED_ORIGINS[1]},http://localhost:5173`;
     const result = validateProductionConfig(env);
     expect(result.warnings.some((warning) => warning.includes('localhost'))).toBe(true);
+  });
+
+  it('keeps API docs disabled by default in production', () => {
+    expect(shouldEnableApiDocs(makeEnv())).toBe(false);
+  });
+
+  it('allows API docs in production only with explicit enable flag', () => {
+    const env = makeEnv();
+    env.ENABLE_API_DOCS = 'true';
+    expect(shouldEnableApiDocs(env)).toBe(true);
+    expect(validateProductionConfig(env).warnings.some((warning) => warning.includes('API docs'))).toBe(
+      true,
+    );
+  });
+
+  it('enables API docs by default in non-production envs', () => {
+    const env = makeEnv();
+    env.NODE_ENV = 'development';
+    delete env.ENABLE_API_DOCS;
+    expect(shouldEnableApiDocs(env)).toBe(true);
   });
 });

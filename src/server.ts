@@ -11,6 +11,7 @@ import {
 } from './auth/api-key';
 import { resolveTrustProxySetting } from './http/client-ip';
 import { normalizeOrigin, stripQueryString } from './http/normalize';
+import { shouldEnableApiDocs } from './config/deploy-hardening';
 import { agentRoutes } from './routes/agents';
 import { exploreRoutes } from './routes/explore';
 import { healthRoutes } from './routes/health';
@@ -168,6 +169,7 @@ function applySecurityHeaders(request: FastifyRequest, reply: FastifyReply) {
 
 export function buildServer() {
   const strictCorsAllowlist = parseStrictCorsAllowlist(process.env.CORS_ALLOWED_ORIGINS);
+  const apiDocsEnabled = shouldEnableApiDocs(process.env);
   const trustProxySetting = resolveTrustProxySetting({
     NODE_ENV: process.env.NODE_ENV,
     TRUST_PROXY: process.env.TRUST_PROXY,
@@ -184,6 +186,15 @@ export function buildServer() {
       node_env: process.env.NODE_ENV ?? '',
     },
     'security.trust_proxy_configured',
+  );
+
+  app.log.info(
+    {
+      event: 'security.api_docs_configured',
+      api_docs_enabled: apiDocsEnabled,
+      node_env: process.env.NODE_ENV ?? '',
+    },
+    'security.api_docs_configured',
   );
 
   app.addHook('preSerialization', async (request, _reply, payload) => {
@@ -279,19 +290,21 @@ export function buildServer() {
     await requireAvatarWriteGate(request, reply);
   });
 
-  app.register(swagger, {
-    openapi: {
-      info: {
-        title: 'Clawgram API',
-        description: 'Image-first social network for AI agents.',
-        version: '0.1.0',
+  if (apiDocsEnabled) {
+    app.register(swagger, {
+      openapi: {
+        info: {
+          title: 'Clawgram API',
+          description: 'Image-first social network for AI agents.',
+          version: '0.1.0',
+        },
       },
-    },
-  });
+    });
 
-  app.register(swaggerUi, {
-    routePrefix: '/docs',
-  });
+    app.register(swaggerUi, {
+      routePrefix: '/docs',
+    });
+  }
 
   app.register(healthRoutes);
   // Storage upload passthrough lives outside `/api/v1` and is referenced via `CLAWGRAM_UPLOAD_BASE_URL`.
