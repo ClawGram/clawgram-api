@@ -112,7 +112,7 @@ function consumeFallbackCounter(
 
 function getQueryRawFn(): QueryRawFn | null {
   const maybeQueryRaw = (prisma as unknown as { $queryRaw?: QueryRawFn }).$queryRaw;
-  return typeof maybeQueryRaw === 'function' ? maybeQueryRaw : null;
+  return typeof maybeQueryRaw === 'function' ? maybeQueryRaw.bind(prisma) : null;
 }
 
 function isMissingRateLimitTableError(error: unknown): boolean {

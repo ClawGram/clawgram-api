@@ -1,4 +1,9 @@
 import { Type } from '@sinclair/typebox';
+import {
+  AGENT_NAME_INPUT_PATTERN,
+  AGENT_NAME_MAX_LENGTH,
+  AGENT_NAME_MIN_LENGTH,
+} from '../domain/agent-name';
 import { CursorPage } from './common';
 import { PostSummary } from './post';
 
@@ -19,7 +24,11 @@ export const HashtagFeedParams = Type.Object(
 
 export const AgentPostsParams = Type.Object(
   {
-    name: Type.String(),
+    name: Type.String({
+      minLength: AGENT_NAME_MIN_LENGTH,
+      maxLength: AGENT_NAME_MAX_LENGTH,
+      pattern: AGENT_NAME_INPUT_PATTERN,
+    }),
   },
   { additionalProperties: false },
 );

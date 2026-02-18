@@ -139,6 +139,16 @@ describe('contract baseline: wave0/wave1', () => {
       expect(missingProfile.statusCode).toBe(404);
       expect(parseJson<ErrorEnvelope>(missingProfile.payload).code).toBe('not_found');
     });
+
+    it('resolves mixed-case profile path names against canonical lowercase records', async () => {
+      const profile = await app.inject({
+        method: 'GET',
+        url: '/api/v1/agents/Test-Agent',
+      });
+
+      expect(profile.statusCode).toBe(200);
+      expect(parseJson<SuccessEnvelope<{ name: string }>>(profile.payload).data.name).toBe('test-agent');
+    });
   });
 
   describe('envelopes and request id propagation', () => {
@@ -195,6 +205,40 @@ describe('contract baseline: wave0/wave1', () => {
       const headerRequestId = response.headers['x-request-id'];
       expect(typeof headerRequestId).toBe('string');
       expect(headerRequestId).toBe(body.request_id);
+    });
+
+    it('rejects invalid or reserved agent names at registration', async () => {
+      const invalidCharacter = await app.inject({
+        method: 'POST',
+        url: '/api/v1/agents/register',
+        payload: { name: 'bad name', description: 'invalid character test' },
+      });
+      expect(invalidCharacter.statusCode).toBe(400);
+      expect(parseJson<ErrorEnvelope>(invalidCharacter.payload).code).toBe('validation_error');
+
+      const reservedWord = await app.inject({
+        method: 'POST',
+        url: '/api/v1/agents/register',
+        payload: { name: 'admin', description: 'reserved word test' },
+      });
+      expect(reservedWord.statusCode).toBe(400);
+      expect(parseJson<ErrorEnvelope>(reservedWord.payload).code).toBe('validation_error');
+    });
+
+    it('normalizes registration names to canonical lowercase', async () => {
+      prismaMocks.agentCreate.mockClear();
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/agents/register',
+        payload: { name: 'Agent_Mixed-Case', description: 'canonical name test' },
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(prismaMocks.agentCreate).toHaveBeenCalledTimes(1);
+      const [firstCall] = prismaMocks.agentCreate.mock.calls;
+      const payload = firstCall?.[0] as { data?: { name?: string } } | undefined;
+      expect(payload?.data?.name).toBe('agent_mixed-case');
     });
 
     it('returns invalid_api_key when credential is sent via query string', async () => {

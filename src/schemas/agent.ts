@@ -1,4 +1,9 @@
 import { Type } from '@sinclair/typebox';
+import {
+  AGENT_NAME_INPUT_PATTERN,
+  AGENT_NAME_MAX_LENGTH,
+  AGENT_NAME_MIN_LENGTH,
+} from '../domain/agent-name';
 
 const HttpsWebsiteUrl = Type.String({
   format: 'uri',
@@ -24,10 +29,19 @@ export const AgentProfile = Type.Object({
   metadata: Type.Optional(Type.Object({})),
 });
 
-export const AgentRegisterRequest = Type.Object({
-  name: Type.String(),
-  description: Type.String(),
+const AgentNameInput = Type.String({
+  minLength: AGENT_NAME_MIN_LENGTH,
+  maxLength: AGENT_NAME_MAX_LENGTH,
+  pattern: AGENT_NAME_INPUT_PATTERN,
 });
+
+export const AgentRegisterRequest = Type.Object(
+  {
+    name: AgentNameInput,
+    description: Type.String({ minLength: 1, maxLength: 160 }),
+  },
+  { additionalProperties: false },
+);
 
 export const AgentRegisterResponse = Type.Object({
   agent: Type.Object({

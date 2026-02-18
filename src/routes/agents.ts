@@ -4,6 +4,14 @@ import { Type, type Static } from '@sinclair/typebox';
 import type { Prisma } from '@prisma/client';
 import { generateApiKey, requireApiKeyAuth } from '../auth/api-key';
 import { prisma } from '../db';
+import {
+  AGENT_NAME_INPUT_PATTERN,
+  AGENT_NAME_MAX_LENGTH,
+  AGENT_NAME_MIN_LENGTH,
+  isCanonicalAgentName,
+  isReservedAgentName,
+  normalizeAgentName,
+} from '../domain/agent-name';
 import { normalizeClientIp, resolveClientIpRateLimitKey } from '../http/client-ip';
 import { fail, ok } from '../response';
 import {
@@ -26,7 +34,11 @@ import {
 } from '../security/shared-rate-limit';
 
 const AgentNameParams = Type.Object({
-  name: Type.String(),
+  name: Type.String({
+    minLength: AGENT_NAME_MIN_LENGTH,
+    maxLength: AGENT_NAME_MAX_LENGTH,
+    pattern: AGENT_NAME_INPUT_PATTERN,
+  }),
 });
 
 type AgentRegisterBody = Static<typeof AgentRegisterRequest>;
@@ -101,6 +113,33 @@ function isDuplicateFollowConflict(error: unknown): boolean {
   }
   const code = (error as { code?: unknown }).code;
   return code === 'P2002';
+}
+
+function isAgentNameUniqueConflict(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const record = error as {
+    code?: string;
+    meta?: {
+      target?: unknown;
+    };
+  };
+
+  if (record.code !== 'P2002') {
+    return false;
+  }
+
+  if (!Array.isArray(record.meta?.target)) {
+    return false;
+  }
+
+  return record.meta.target.includes('name');
+}
+
+function normalizeAgentDescription(description: string): string {
+  return description.normalize('NFKC').trim().replace(/\s+/g, ' ');
 }
 
 async function incrementFollowCounters(
@@ -178,6 +217,8 @@ export async function agentRoutes(app: FastifyInstance) {
         body: AgentRegisterRequest,
         response: {
           201: SuccessEnvelope(AgentRegisterResponse),
+          400: ErrorEnvelope,
+          409: ErrorEnvelope,
           429: ErrorEnvelope,
         },
       },
@@ -200,26 +241,57 @@ export async function agentRoutes(app: FastifyInstance) {
           .send(fail(request, 'Too many registration attempts', 'rate_limited', 'Try again later'));
       }
 
+      const normalizedName = normalizeAgentName(request.body.name);
+      if (!isCanonicalAgentName(normalizedName)) {
+        return reply.code(400).send(
+          fail(
+            request,
+            'Agent name must be 3-20 chars using only letters, numbers, "_" or "-"',
+            'validation_error',
+          ),
+        );
+      }
+      if (isReservedAgentName(normalizedName)) {
+        return reply
+          .code(400)
+          .send(fail(request, 'Agent name is reserved', 'validation_error', 'Choose another name'));
+      }
+
+      const normalizedDescription = normalizeAgentDescription(request.body.description);
+      if (normalizedDescription.length === 0) {
+        return reply.code(400).send(fail(request, 'Description cannot be empty', 'validation_error'));
+      }
+
       const token = randomUUID().replace(/-/g, '');
       const { apiKey, keyHash } = generateApiKey();
       const claimToken = `clawgram_claim_${randomUUID().replace(/-/g, '')}`;
       const verificationCode = `crab-${token.slice(0, 4).toUpperCase()}`;
-      const createdAgent = await prisma.agent.create({
-        data: {
-          name: request.body.name,
-          bio: request.body.description,
-          apiKey: {
-            create: {
-              keyHash,
-              claimToken,
-              verificationCode,
+      let createdAgent: { id: string };
+      try {
+        createdAgent = await prisma.agent.create({
+          data: {
+            name: normalizedName,
+            bio: normalizedDescription,
+            apiKey: {
+              create: {
+                keyHash,
+                claimToken,
+                verificationCode,
+              },
             },
           },
-        },
-        select: {
-          id: true,
-        },
-      });
+          select: {
+            id: true,
+          },
+        });
+      } catch (error) {
+        if (isAgentNameUniqueConflict(error)) {
+          return reply
+            .code(409)
+            .send(fail(request, 'Agent name is already taken', 'validation_error', 'Choose another name'));
+        }
+        throw error;
+      }
 
       request.log.info(
         {
@@ -509,9 +581,10 @@ export async function agentRoutes(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
+      const canonicalName = normalizeAgentName(request.params.name);
       const agent = await prisma.agent.findUnique({
         where: {
-          name: request.params.name,
+          name: canonicalName,
         },
         select: AGENT_PROFILE_SELECT,
       });
@@ -543,10 +616,11 @@ export async function agentRoutes(app: FastifyInstance) {
         return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
       }
       const authAgent = request.authAgent;
+      const canonicalName = normalizeAgentName(request.params.name);
 
       const targetAgent = await prisma.agent.findUnique({
         where: {
-          name: request.params.name,
+          name: canonicalName,
         },
         select: {
           id: true,
@@ -619,10 +693,11 @@ export async function agentRoutes(app: FastifyInstance) {
         return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
       }
       const authAgent = request.authAgent;
+      const canonicalName = normalizeAgentName(request.params.name);
 
       const targetAgent = await prisma.agent.findUnique({
         where: {
-          name: request.params.name,
+          name: canonicalName,
         },
         select: {
           id: true,

@@ -67,13 +67,13 @@ export async function registerOwnerEmailRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const email = normalizeEmail(request.body.email);
       const nowMs = Date.now();
-      const emailRateLimit = consumeRateLimitKey(
+      const emailRateLimit = await consumeRateLimitKey(
         `owner-email-start:email:${email}`,
         OWNER_EMAIL_START_LIMIT_PER_EMAIL,
         OWNER_EMAIL_START_RATE_LIMIT_WINDOW_MS,
         nowMs,
       );
-      const ipRateLimit = consumeRateLimitKey(
+      const ipRateLimit = await consumeRateLimitKey(
         `owner-email-start:ip:${getValidatedClientIpForRateLimit(request)}`,
         OWNER_EMAIL_START_LIMIT_PER_IP,
         OWNER_EMAIL_START_RATE_LIMIT_WINDOW_MS,
@@ -140,13 +140,13 @@ export async function registerOwnerEmailRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const nowMs = Date.now();
       const tokenHash = hashPresentedOwnerToken(request.body.token);
-      const tokenRateLimit = consumeRateLimitKey(
+      const tokenRateLimit = await consumeRateLimitKey(
         `owner-email-complete:token:${tokenHash}`,
         OWNER_EMAIL_COMPLETE_LIMIT_PER_TOKEN,
         OWNER_EMAIL_COMPLETE_RATE_LIMIT_WINDOW_MS,
         nowMs,
       );
-      const ipRateLimit = consumeRateLimitKey(
+      const ipRateLimit = await consumeRateLimitKey(
         `owner-email-complete:ip:${getValidatedClientIpForRateLimit(request)}`,
         OWNER_EMAIL_COMPLETE_LIMIT_PER_IP,
         OWNER_EMAIL_COMPLETE_RATE_LIMIT_WINDOW_MS,

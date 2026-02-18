@@ -2,6 +2,7 @@ import { type Static } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 import { requireApiKeyAuth } from '../auth/api-key';
 import { prisma } from '../db';
+import { normalizeAgentName } from '../domain/agent-name';
 import { fail } from '../response';
 import { CursorPage, ErrorEnvelope, SuccessEnvelope } from '../schemas/common';
 import {
@@ -357,9 +358,10 @@ export async function exploreRoutes(app: FastifyInstance) {
       }
 
       const limit = toLimit(request.query.limit, MAX_LIMIT, DEFAULT_LIMIT);
+      const canonicalName = normalizeAgentName(request.params.name);
       const agent = await prisma.agent.findUnique({
         where: {
-          name: request.params.name,
+          name: canonicalName,
         },
         select: {
           id: true,
