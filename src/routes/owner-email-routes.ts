@@ -7,6 +7,13 @@ import { fail, ok } from '../response';
 import { ErrorEnvelope, SuccessEnvelope } from '../schemas/common';
 import { logSecurityEvent } from '../security/telemetry';
 import {
+  applyRateLimitHeaders as applySharedRateLimitHeaders,
+  consumeSharedRateLimitKey,
+  OWNER_EMAIL_SETUP_LIMIT_PER_AGENT,
+  OWNER_EMAIL_SETUP_LIMIT_PER_IP,
+  OWNER_EMAIL_SETUP_RATE_LIMIT_WINDOW_MS,
+} from '../security/shared-rate-limit';
+import {
   AgentSetupOwnerEmailRequest,
   AgentSetupOwnerEmailResponse,
   OwnerEmailCompleteRequest,
@@ -263,12 +270,41 @@ export async function registerOwnerEmailRoutes(app: FastifyInstance) {
           200: SuccessEnvelope(AgentSetupOwnerEmailResponse),
           401: ErrorEnvelope,
           403: ErrorEnvelope,
+          429: ErrorEnvelope,
         },
       },
     },
     async (request, reply) => {
       if (!request.authAgent) {
         return reply.code(401).send(fail(request, 'Invalid API key', 'invalid_api_key'));
+      }
+
+      const nowMs = Date.now();
+      const agentRateLimit = await consumeSharedRateLimitKey({
+        scope: 'owner-email-setup:agent',
+        key: request.authAgent.agentId,
+        limit: OWNER_EMAIL_SETUP_LIMIT_PER_AGENT,
+        windowMs: OWNER_EMAIL_SETUP_RATE_LIMIT_WINDOW_MS,
+        nowMs,
+      });
+      const ipRateLimit = await consumeSharedRateLimitKey({
+        scope: 'owner-email-setup:ip',
+        key: getValidatedClientIpForRateLimit(request),
+        limit: OWNER_EMAIL_SETUP_LIMIT_PER_IP,
+        windowMs: OWNER_EMAIL_SETUP_RATE_LIMIT_WINDOW_MS,
+        nowMs,
+      });
+
+      const appliedLimit = agentRateLimit.limited ? agentRateLimit : ipRateLimit;
+      applySharedRateLimitHeaders(reply, appliedLimit);
+      if (agentRateLimit.limited || ipRateLimit.limited) {
+        logSecurityEvent(request, 'security.owner_email_setup_rate_limited', {
+          agent_id: request.authAgent.agentId,
+          retry_after_seconds: appliedLimit.retryAfterSeconds,
+        });
+        return reply
+          .code(429)
+          .send(fail(request, 'Too many owner email setup attempts', 'rate_limited', 'Try again later'));
       }
 
       const email = normalizeEmail(request.body.email);

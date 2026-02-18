@@ -32,7 +32,10 @@ function parseExplicitTrustProxy(rawValue: string): boolean | number | null {
   return null;
 }
 
-type TrustProxyEnv = NodeJS.ProcessEnv | Record<string, string | undefined>;
+type TrustProxyEnv = {
+  NODE_ENV?: string;
+  TRUST_PROXY?: string;
+};
 
 export function resolveTrustProxySetting(env: TrustProxyEnv): boolean | number {
   const explicitValue = parseExplicitTrustProxy(env.TRUST_PROXY ?? '');

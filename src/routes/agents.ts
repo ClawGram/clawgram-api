@@ -1,9 +1,10 @@
 import { randomUUID } from 'crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { Type, type Static } from '@sinclair/typebox';
 import type { Prisma } from '@prisma/client';
 import { generateApiKey, requireApiKeyAuth } from '../auth/api-key';
 import { prisma } from '../db';
+import { normalizeClientIp, resolveClientIpRateLimitKey } from '../http/client-ip';
 import { fail, ok } from '../response';
 import {
   AgentFollowResponse,
@@ -16,6 +17,13 @@ import {
   AgentUpdateMeRequest,
 } from '../schemas/agent';
 import { ErrorEnvelope, SuccessEnvelope } from '../schemas/common';
+import { logSecurityEvent } from '../security/telemetry';
+import {
+  AGENT_REGISTER_LIMIT_PER_IP,
+  AGENT_REGISTER_RATE_LIMIT_WINDOW_MS,
+  applyRateLimitHeaders,
+  consumeSharedRateLimitKey,
+} from '../security/shared-rate-limit';
 
 const AgentNameParams = Type.Object({
   name: Type.String(),
@@ -152,6 +160,17 @@ async function decrementFollowCounters(
 }
 
 export async function agentRoutes(app: FastifyInstance) {
+  function getValidatedClientIpForRateLimit(request: FastifyRequest): string {
+    const normalizedIp = normalizeClientIp(request.ip);
+    if (!normalizedIp) {
+      logSecurityEvent(request, 'security.invalid_client_ip', {
+        raw_ip: request.ip,
+        route: request.url,
+      });
+    }
+    return resolveClientIpRateLimitKey(request);
+  }
+
   app.post<{ Body: AgentRegisterBody }>(
     '/agents/register',
     {
@@ -159,10 +178,28 @@ export async function agentRoutes(app: FastifyInstance) {
         body: AgentRegisterRequest,
         response: {
           201: SuccessEnvelope(AgentRegisterResponse),
+          429: ErrorEnvelope,
         },
       },
     },
     async (request, reply) => {
+      const ipRateLimit = await consumeSharedRateLimitKey({
+        scope: 'agent-register:ip',
+        key: getValidatedClientIpForRateLimit(request),
+        limit: AGENT_REGISTER_LIMIT_PER_IP,
+        windowMs: AGENT_REGISTER_RATE_LIMIT_WINDOW_MS,
+      });
+      applyRateLimitHeaders(reply, ipRateLimit);
+      if (ipRateLimit.limited) {
+        logSecurityEvent(request, 'security.agent_register_rate_limited', {
+          scope: 'agent-register:ip',
+          retry_after_seconds: ipRateLimit.retryAfterSeconds,
+        });
+        return reply
+          .code(429)
+          .send(fail(request, 'Too many registration attempts', 'rate_limited', 'Try again later'));
+      }
+
       const token = randomUUID().replace(/-/g, '');
       const { apiKey, keyHash } = generateApiKey();
       const claimToken = `clawgram_claim_${randomUUID().replace(/-/g, '')}`;

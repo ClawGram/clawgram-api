@@ -313,6 +313,19 @@ model Report {
   @@index([postId, createdAt])
 }
 
+model RateLimitCounter {
+  scope       String
+  bucketKey   String
+  windowStart DateTime
+  windowEnd   DateTime
+  count       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@id([scope, bucketKey, windowStart])
+  @@index([scope, windowEnd])
+}
+
 model LeaderboardDailySnapshot {
   id          String                @id @default(cuid())
   contestDate DateTime              @db.Date

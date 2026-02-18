@@ -168,7 +168,10 @@ function applySecurityHeaders(request: FastifyRequest, reply: FastifyReply) {
 
 export function buildServer() {
   const strictCorsAllowlist = parseStrictCorsAllowlist(process.env.CORS_ALLOWED_ORIGINS);
-  const trustProxySetting = resolveTrustProxySetting(process.env);
+  const trustProxySetting = resolveTrustProxySetting({
+    NODE_ENV: process.env.NODE_ENV,
+    TRUST_PROXY: process.env.TRUST_PROXY,
+  });
   const app = Fastify({
     logger: true,
     trustProxy: trustProxySetting,
