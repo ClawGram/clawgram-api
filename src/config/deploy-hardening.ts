@@ -84,6 +84,19 @@ function parseOptionalBoolean(raw: string | undefined): boolean | null {
   return null;
 }
 
+function readOwnerEmailTransport(env: EnvMap): string {
+  return (readTrimmed(env, 'OWNER_EMAIL_TRANSPORT') ?? 'log').toLowerCase();
+}
+
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 export function shouldEnableApiDocs(env: EnvMap): boolean {
   const explicit = parseOptionalBoolean(env.ENABLE_API_DOCS);
   if (isProductionEnv(env)) {
@@ -149,6 +162,29 @@ export function validateProductionConfig(env: EnvMap): ProductionConfigValidatio
 
   if (shouldEnableApiDocs(env)) {
     warnings.push('ENABLE_API_DOCS is enabled in production; API docs will be publicly exposed');
+  }
+
+  const ownerEmailTransport = readOwnerEmailTransport(env);
+  if (!['noop', 'log', 'resend'].includes(ownerEmailTransport)) {
+    errors.push('OWNER_EMAIL_TRANSPORT must be one of: noop, log, resend');
+  }
+
+  if (ownerEmailTransport === 'resend') {
+    const resendApiKey = readTrimmed(env, 'RESEND_API_KEY');
+    const ownerEmailFrom = readTrimmed(env, 'OWNER_EMAIL_FROM');
+    const ownerEmailClaimBaseUrl = readTrimmed(env, 'OWNER_EMAIL_CLAIM_BASE_URL');
+
+    if (!resendApiKey) {
+      errors.push('Missing required production env var for resend mode: RESEND_API_KEY');
+    }
+    if (!ownerEmailFrom) {
+      errors.push('Missing required production env var for resend mode: OWNER_EMAIL_FROM');
+    }
+    if (!ownerEmailClaimBaseUrl) {
+      errors.push('Missing required production env var for resend mode: OWNER_EMAIL_CLAIM_BASE_URL');
+    } else if (!isValidHttpUrl(ownerEmailClaimBaseUrl)) {
+      errors.push('OWNER_EMAIL_CLAIM_BASE_URL must be a valid http/https URL');
+    }
   }
 
   return { errors, warnings };

@@ -72,4 +72,23 @@ describe('validateProductionConfig', () => {
     delete env.ENABLE_API_DOCS;
     expect(shouldEnableApiDocs(env)).toBe(true);
   });
+
+  it('fails when resend transport is selected without required resend env vars', () => {
+    const env = makeEnv();
+    env.OWNER_EMAIL_TRANSPORT = 'resend';
+    const result = validateProductionConfig(env);
+    expect(result.errors.some((error) => error.includes('RESEND_API_KEY'))).toBe(true);
+    expect(result.errors.some((error) => error.includes('OWNER_EMAIL_FROM'))).toBe(true);
+    expect(result.errors.some((error) => error.includes('OWNER_EMAIL_CLAIM_BASE_URL'))).toBe(true);
+  });
+
+  it('passes resend transport validation when resend env vars are set', () => {
+    const env = makeEnv();
+    env.OWNER_EMAIL_TRANSPORT = 'resend';
+    env.RESEND_API_KEY = 're_test_xxx';
+    env.OWNER_EMAIL_FROM = 'Clawgram <noreply@clawgram.org>';
+    env.OWNER_EMAIL_CLAIM_BASE_URL = 'https://clawgram.org/claim';
+    const result = validateProductionConfig(env);
+    expect(result.errors).toEqual([]);
+  });
 });

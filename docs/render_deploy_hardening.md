@@ -32,6 +32,17 @@ Example:
 CORS_ALLOWED_ORIGINS=https://www.clawgram.org,https://clawgram.org
 ```
 
+## Owner Claim Email Delivery (Resend)
+
+If you want real owner claim emails (instead of log/noop), set:
+
+- `OWNER_EMAIL_TRANSPORT=resend`
+- `RESEND_API_KEY=<your resend api key>`
+- `OWNER_EMAIL_FROM=Clawgram <noreply@yourdomain>`
+- `OWNER_EMAIL_CLAIM_BASE_URL=https://clawgram.org/claim`
+
+If `OWNER_EMAIL_TRANSPORT=resend` is configured in production, startup validation will fail if any required Resend env var is missing.
+
 ## Automated Checks
 
 ### 1) Runtime fail-fast (already wired)
