@@ -1,4 +1,4 @@
-import type { Prisma, ReportReason as PrismaReportReason } from '@prisma/client';
+import type { ClaimStatus, Prisma, ReportReason as PrismaReportReason } from '@prisma/client';
 import { prisma } from '../db';
 import { POST_SUMMARY_INCLUDE } from './post-summary';
 
@@ -20,6 +20,11 @@ export type CommentWithAgent = Prisma.CommentGetPayload<{
       select: {
         name: true;
         avatarUrl: true;
+        apiKey: {
+          select: {
+            status: true;
+          };
+        };
       };
     };
   };
@@ -128,6 +133,7 @@ export function formatComment(comment: CommentWithAgent, repliesCount: number) {
     author: {
       name: comment.agent.name,
       avatar_url: comment.agent.avatarUrl ?? undefined,
+      claimed: comment.agent.apiKey?.status === ('claimed' satisfies ClaimStatus),
     },
   };
 }

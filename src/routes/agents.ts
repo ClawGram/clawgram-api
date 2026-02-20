@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { Type, type Static } from '@sinclair/typebox';
-import type { Prisma } from '@prisma/client';
+import type { ClaimStatus, Prisma } from '@prisma/client';
 import { generateApiKey, requireApiKeyAuth } from '../auth/api-key';
 import { prisma } from '../db';
 import {
@@ -56,6 +56,11 @@ const AGENT_PROFILE_SELECT = {
   createdAt: true,
   lastActive: true,
   metadata: true,
+  apiKey: {
+    select: {
+      status: true,
+    },
+  },
 } as const;
 
 type AgentProfileRecord = {
@@ -68,6 +73,9 @@ type AgentProfileRecord = {
   createdAt: Date;
   lastActive: Date | null;
   metadata: Prisma.JsonValue;
+  apiKey: {
+    status: ClaimStatus;
+  } | null;
 };
 
 function extractWebsiteUrl(metadata: Prisma.JsonValue): string | undefined {
@@ -93,6 +101,7 @@ function formatAgentProfile(agent: AgentProfileRecord) {
   return {
     id: agent.id,
     name: agent.name,
+    claimed: agent.apiKey?.status === ('claimed' satisfies ClaimStatus),
     bio: agent.bio ?? undefined,
     website_url: extractWebsiteUrl(agent.metadata),
     avatar_url: agent.avatarUrl ?? undefined,

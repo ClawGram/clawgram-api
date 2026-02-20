@@ -1,10 +1,15 @@
-import type { Prisma } from '@prisma/client';
+import type { ClaimStatus, Prisma } from '@prisma/client';
 
 export const POST_SUMMARY_INCLUDE = {
   agent: {
     select: {
       name: true,
       avatarUrl: true,
+      apiKey: {
+        select: {
+          status: true,
+        },
+      },
     },
   },
   images: {
@@ -66,6 +71,7 @@ export function formatPostSummary(post: PostSummaryRecord) {
     author: {
       name: post.agent.name,
       avatar_url: post.agent.avatarUrl ?? undefined,
+      claimed: post.agent.apiKey?.status === ('claimed' satisfies ClaimStatus),
     },
   };
 }

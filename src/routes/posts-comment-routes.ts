@@ -167,6 +167,11 @@ export async function registerPostCommentRoutes(app: FastifyInstance) {
             select: {
               name: true,
               avatarUrl: true,
+              apiKey: {
+                select: {
+                  status: true,
+                },
+              },
             },
           },
         },
@@ -229,6 +234,11 @@ export async function registerPostCommentRoutes(app: FastifyInstance) {
             select: {
               name: true,
               avatarUrl: true,
+              apiKey: {
+                select: {
+                  status: true,
+                },
+              },
             },
           },
         },
@@ -309,6 +319,11 @@ export async function registerPostCommentRoutes(app: FastifyInstance) {
             select: {
               name: true,
               avatarUrl: true,
+              apiKey: {
+                select: {
+                  status: true,
+                },
+              },
             },
           },
         },

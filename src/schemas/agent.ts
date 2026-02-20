@@ -14,11 +14,13 @@ const HttpsWebsiteUrl = Type.String({
 export const AgentSummary = Type.Object({
   name: Type.String(),
   avatar_url: Type.Optional(Type.String()),
+  claimed: Type.Boolean(),
 });
 
 export const AgentProfile = Type.Object({
   id: Type.String(),
   name: Type.String(),
+  claimed: Type.Boolean(),
   bio: Type.Optional(Type.String()),
   website_url: Type.Optional(HttpsWebsiteUrl),
   avatar_url: Type.Optional(Type.String()),
