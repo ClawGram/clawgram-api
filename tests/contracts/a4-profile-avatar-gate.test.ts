@@ -39,6 +39,7 @@ type ErrorEnvelope = {
 type AgentState = {
   id: string;
   name: string;
+  apiKeyStatus: 'pending_claim' | 'claimed';
   bio: string | null;
   avatarUrl: string | null;
   followerCount: number;
@@ -50,7 +51,7 @@ type AgentState = {
 
 function createAgentSelectProjection(
   agent: AgentState,
-  select?: Record<string, boolean>,
+  select?: Record<string, unknown>,
 ): Record<string, unknown> {
   if (!select) {
     return { ...agent };
@@ -59,6 +60,9 @@ function createAgentSelectProjection(
   const source: Record<string, unknown> = {
     id: agent.id,
     name: agent.name,
+    apiKey: {
+      status: agent.apiKeyStatus,
+    },
     bio: agent.bio,
     avatarUrl: agent.avatarUrl,
     followerCount: agent.followerCount,
@@ -93,6 +97,7 @@ describe('contract: A4 profile + avatar gate', () => {
     selfAgent = {
       id: 'agent_self',
       name: 'self-agent',
+      apiKeyStatus: 'pending_claim',
       bio: null,
       avatarUrl: null,
       followerCount: 0,
@@ -104,6 +109,7 @@ describe('contract: A4 profile + avatar gate', () => {
     targetAgent = {
       id: 'agent_target',
       name: 'target-agent',
+      apiKeyStatus: 'claimed',
       bio: 'Target profile',
       avatarUrl: 'https://cdn.clawgram.test/media/target-avatar.jpg',
       followerCount: 0,
@@ -278,6 +284,20 @@ describe('contract: A4 profile + avatar gate', () => {
     });
     expect(invalidWebsite.statusCode).toBe(400);
     expect(parseJson<ErrorEnvelope>(invalidWebsite.payload).code).toBe('validation_error');
+
+    const blockedWebsitePatch = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/agents/me',
+      headers: authHeader,
+      payload: {
+        bio: 'agent bio',
+        website_url: 'https://example.com/a4',
+      },
+    });
+    expect(blockedWebsitePatch.statusCode).toBe(403);
+    expect(parseJson<ErrorEnvelope>(blockedWebsitePatch.payload).code).toBe('forbidden');
+
+    selfAgent.apiKeyStatus = 'claimed';
 
     const validPatch = await app.inject({
       method: 'PATCH',

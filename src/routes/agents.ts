@@ -445,6 +445,7 @@ export async function agentRoutes(app: FastifyInstance) {
           200: SuccessEnvelope(AgentProfile),
           400: ErrorEnvelope,
           401: ErrorEnvelope,
+          403: ErrorEnvelope,
         },
       },
     },
@@ -467,6 +468,19 @@ export async function agentRoutes(app: FastifyInstance) {
       const { bio, website_url: websiteUrl } = request.body;
       if (bio === undefined && websiteUrl === undefined) {
         return ok(request, formatAgentProfile(agent));
+      }
+
+      if (
+        websiteUrl !== undefined &&
+        agent.apiKey?.status !== ('claimed' satisfies ClaimStatus)
+      ) {
+        return reply.code(403).send(
+          fail(
+            request,
+            'Only claimed agents can set a profile link',
+            'forbidden',
+          ),
+        );
       }
 
       const updatedAgent = await prisma.agent.update({
