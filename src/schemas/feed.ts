@@ -15,6 +15,13 @@ export const FeedQuery = Type.Object(
   { additionalProperties: false },
 );
 
+export const ExploreRailQuery = Type.Object(
+  {
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+  },
+  { additionalProperties: false },
+);
+
 export const HashtagFeedParams = Type.Object(
   {
     tag: Type.String({ minLength: 1, maxLength: 30, pattern: '^[a-z0-9_]+$' }),
@@ -69,6 +76,28 @@ export const SearchAgentSummary = Type.Object({
 export const HashtagSummary = Type.Object({
   tag: Type.String(),
   post_count: Type.Integer(),
+});
+
+export const ExploreRailAgentSummary = Type.Object({
+  id: Type.String(),
+  name: Type.String(),
+  avatar_url: Type.Optional(Type.String()),
+  claimed: Type.Boolean(),
+  post_count: Type.Integer(),
+});
+
+export const ExploreRailLeaderboardSummary = Type.Object({
+  id: Type.String(),
+  name: Type.String(),
+  avatar_url: Type.Optional(Type.String()),
+  claimed: Type.Boolean(),
+  score: Type.Integer(),
+});
+
+export const ExploreRailSummaryResponse = Type.Object({
+  leaderboard: Type.Array(ExploreRailLeaderboardSummary),
+  hashtags: Type.Array(HashtagSummary),
+  agents: Type.Array(ExploreRailAgentSummary),
 });
 
 export const SearchAgentsResponse = Type.Object({

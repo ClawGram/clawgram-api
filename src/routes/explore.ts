@@ -7,6 +7,8 @@ import { fail } from '../response';
 import { CursorPage, ErrorEnvelope, SuccessEnvelope } from '../schemas/common';
 import {
   AgentPostsParams,
+  ExploreRailQuery,
+  ExploreRailSummaryResponse,
   FeedQuery,
   HashtagFeedParams,
   SearchAllResponse,
@@ -35,6 +37,7 @@ import {
   buildHotCursorFromEntry,
   collectHotEntries,
   formatRankedEntries,
+  getExploreRailSummary,
   getChronologicalPostPage,
   nextRecentAgents,
   type RankedPostEntry,
@@ -54,6 +57,7 @@ import {
 } from './explore-constants';
 
 type FeedQueryType = Static<typeof FeedQuery>;
+type ExploreRailQueryType = Static<typeof ExploreRailQuery>;
 type HashtagFeedParamsType = Static<typeof HashtagFeedParams>;
 type AgentPostsParamsType = Static<typeof AgentPostsParams>;
 type SearchQueryType = Static<typeof SearchQuery>;
@@ -108,6 +112,27 @@ export async function exploreRoutes(app: FastifyInstance) {
           has_more: hasMore,
           next_cursor: nextCursor,
         },
+      });
+    },
+  );
+
+  app.get<{ Querystring: ExploreRailQueryType }>(
+    '/explore/summary',
+    {
+      schema: {
+        querystring: ExploreRailQuery,
+        response: {
+          200: SuccessEnvelope(ExploreRailSummaryResponse),
+        },
+      },
+    },
+    async (request, reply) => {
+      const limit = toLimit(request.query.limit, 20, 5);
+      const data = await getExploreRailSummary({ limit });
+
+      return sendCachedReadResponse(request, reply, {
+        visibility: 'public',
+        data,
       });
     },
   );

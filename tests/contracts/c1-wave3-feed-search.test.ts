@@ -7,6 +7,8 @@ import { parseJson } from './helpers/contract-test-helpers';
 const prismaMocks = vi.hoisted(() => ({
   apiKeyFindUnique: vi.fn(),
   postFindMany: vi.fn(),
+  postGroupBy: vi.fn(),
+  postHashtagGroupBy: vi.fn(),
   followFindMany: vi.fn(),
   agentFindUnique: vi.fn(),
   agentFindMany: vi.fn(),
@@ -17,7 +19,8 @@ vi.mock('../../src/db', async () => {
   const { createPrismaDbMock } = await import('./helpers/contract-test-helpers');
   return createPrismaDbMock(prismaMocks, {
     apiKey: ['findUnique'],
-    post: ['findMany'],
+    post: ['findMany', 'groupBy'],
+    postHashtag: ['groupBy'],
     follow: ['findMany'],
     agent: ['findUnique', 'findMany'],
     hashtag: ['findMany'],
@@ -225,6 +228,8 @@ describe('contract: C1 wave3 feed/search surface', () => {
   });
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-02-09T13:00:00.000Z'));
     vi.clearAllMocks();
     agents = [
       { id: 'agent_viewer', name: 'viewer', avatarUrl: 'https://cdn/viewer.png', bio: 'main viewer', followerCount: 10, followingCount: 2, claimStatus: 'claimed' },
@@ -288,6 +293,8 @@ describe('contract: C1 wave3 feed/search surface', () => {
       { id: 'tag_nature', tag: 'nature', postCount: posts.filter((post) => post.hashtags.includes('nature')).length },
       { id: 'tag_dogs', tag: 'dogs', postCount: posts.filter((post) => post.hashtags.includes('dogs')).length },
       { id: 'tag_ai', tag: 'ai', postCount: posts.filter((post) => post.hashtags.includes('ai')).length },
+      { id: 'tag_wild', tag: 'wild', postCount: posts.filter((post) => post.hashtags.includes('wild')).length },
+      { id: 'tag_birds', tag: 'birds', postCount: posts.filter((post) => post.hashtags.includes('birds')).length },
     ];
 
     followsByFollower = new Map([
@@ -383,6 +390,46 @@ describe('contract: C1 wave3 feed/search surface', () => {
       },
     );
 
+    prismaMocks.postGroupBy.mockImplementation(({ where, take }: { where: any; take: number }) =>
+      [...posts.filter((post) => filterPostWhere(post, where)).reduce((counts, post) => {
+        counts.set(post.agentId, (counts.get(post.agentId) ?? 0) + 1);
+        return counts;
+      }, new Map<string, number>()).entries()]
+        .sort((left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
+        .slice(0, take)
+        .map(([agentId, count]) => ({
+          agentId,
+          _count: {
+            agentId: count,
+          },
+        })),
+    );
+
+    prismaMocks.postHashtagGroupBy.mockImplementation(({ where, take }: { where: any; take: number }) => {
+      const includeOnlyNonDeleted = where?.post?.deletedAt === null;
+      const filteredPosts = includeOnlyNonDeleted ? posts.filter((post) => post.deletedAt === null) : posts;
+      const counts = new Map<string, number>();
+      for (const post of filteredPosts) {
+        for (const tag of post.hashtags) {
+          const hashtag = hashtags.find((entry) => entry.tag === tag);
+          if (!hashtag) {
+            continue;
+          }
+          counts.set(hashtag.id, (counts.get(hashtag.id) ?? 0) + 1);
+        }
+      }
+
+      return [...counts.entries()]
+        .sort((left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
+        .slice(0, take)
+        .map(([hashtagId, count]) => ({
+          hashtagId,
+          _count: {
+            hashtagId: count,
+          },
+        }));
+    });
+
     prismaMocks.agentFindUnique.mockImplementation(({ where }: { where: { name?: string; id?: string } }) => {
       if (where.name) {
         const agent = agents.find((row) => row.name === where.name);
@@ -450,6 +497,7 @@ describe('contract: C1 wave3 feed/search surface', () => {
   });
 
   afterAll(async () => {
+    vi.useRealTimers();
     await app.close();
   });
 
@@ -488,6 +536,38 @@ describe('contract: C1 wave3 feed/search surface', () => {
     const secondBody = parseJson<{ success: true; data: { items: Array<{ id: string }> } }>(secondPage.payload);
     const firstIds = new Set(firstBody.data.items.map((item) => item.id));
     expect(secondBody.data.items.some((item) => firstIds.has(item.id))).toBe(false);
+  });
+
+  it('returns site-wide rail summary counts for hashtags and active agents', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/explore/summary?limit=3',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = parseJson<{
+      success: true;
+      data: {
+        leaderboard: Array<{ name: string; score: number }>;
+        hashtags: Array<{ tag: string; post_count: number }>;
+        agents: Array<{ name: string; post_count: number }>;
+      };
+    }>(response.payload);
+    expect(body.data.leaderboard).toEqual([
+      expect.objectContaining({ name: 'alpha', score: 91 }),
+      expect.objectContaining({ name: 'beta', score: 78 }),
+      expect.objectContaining({ name: 'gamma', score: 18 }),
+    ]);
+    expect(body.data.hashtags).toEqual([
+      { tag: 'cats', post_count: 9 },
+      { tag: 'nature', post_count: 2 },
+      { tag: 'wild', post_count: 2 },
+    ]);
+    expect(body.data.agents).toEqual([
+      expect.objectContaining({ name: 'alpha', post_count: 3 }),
+      expect.objectContaining({ name: 'beta', post_count: 3 }),
+      expect.objectContaining({ name: 'delta', post_count: 1 }),
+    ]);
   });
 
   it('returns following feed with best-effort 80/20 blend and explore backfill', async () => {
@@ -649,6 +729,7 @@ describe('contract: C1 wave3 feed/search surface', () => {
   it('applies explicit public read cache policy and 304 validators on frozen public endpoints', async () => {
     const endpoints = [
       '/api/v1/explore?limit=6',
+      '/api/v1/explore/summary?limit=3',
       '/api/v1/hashtags/cats/feed?limit=3',
       '/api/v1/agents/alpha/posts?limit=3',
       '/api/v1/search?type=posts&q=cats&limit=2',

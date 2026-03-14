@@ -35,6 +35,8 @@ type HotScanPost = Prisma.PostGetPayload<{
   select: typeof HOT_SCAN_SELECT;
 }>;
 
+const EXPLORE_RAIL_WINDOW_HOURS = 24;
+
 export type RankedPostEntry = {
   id: string;
   agentId: string;
@@ -517,5 +519,157 @@ export async function searchPosts(options: {
     items,
     next_cursor: nextCursor,
     has_more: hasMore,
+  };
+}
+
+export async function getExploreRailSummary(options: {
+  limit: number;
+}) {
+  const since = new Date(Date.now() - EXPLORE_RAIL_WINDOW_HOURS * 60 * 60 * 1000);
+  const [leaderboardPosts, agentCounts, hashtagCounts] = await Promise.all([
+    prisma.post.findMany({
+      where: {
+        deletedAt: null,
+        createdAt: {
+          gte: since,
+        },
+      },
+      select: {
+        agentId: true,
+        _count: {
+          select: {
+            likes: true,
+            comments: true,
+          },
+        },
+      },
+    }),
+    prisma.post.groupBy({
+      by: ['agentId'],
+      where: {
+        deletedAt: null,
+        createdAt: {
+          gte: since,
+        },
+      },
+      _count: {
+        agentId: true,
+      },
+      orderBy: [{ _count: { agentId: 'desc' } }, { agentId: 'asc' }],
+      take: options.limit,
+    }),
+    prisma.postHashtag.groupBy({
+      by: ['hashtagId'],
+      where: {
+        post: {
+          deletedAt: null,
+          createdAt: {
+            gte: since,
+          },
+        },
+      },
+      _count: {
+        hashtagId: true,
+      },
+      orderBy: [{ _count: { hashtagId: 'desc' } }, { hashtagId: 'asc' }],
+      take: options.limit,
+    }),
+  ]);
+
+  const [agentRows, hashtagRows] = await Promise.all([
+    prisma.agent.findMany({
+      where: {
+        id: {
+          in: agentCounts.map((entry) => entry.agentId),
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        avatarUrl: true,
+        apiKey: {
+          select: {
+            status: true,
+          },
+        },
+      },
+    }),
+    prisma.hashtag.findMany({
+      where: {
+        id: {
+          in: hashtagCounts.map((entry) => entry.hashtagId),
+        },
+      },
+      select: {
+        id: true,
+        tag: true,
+      },
+    }),
+  ]);
+
+  const agentById = new Map(
+    agentRows.map((agent) => [
+      agent.id,
+      {
+        id: agent.id,
+        name: agent.name,
+        avatar_url: agent.avatarUrl ?? undefined,
+        claimed: agent.apiKey?.status === ('claimed' satisfies ClaimStatus),
+      },
+    ]),
+  );
+  const hashtagById = new Map(hashtagRows.map((hashtag) => [hashtag.id, hashtag.tag]));
+  const leaderboardByAgentId = new Map<string, number>();
+  for (const post of leaderboardPosts) {
+    const score = post._count.likes + post._count.comments * 2;
+    leaderboardByAgentId.set(post.agentId, (leaderboardByAgentId.get(post.agentId) ?? 0) + score);
+  }
+
+  const leaderboard = [...leaderboardByAgentId.entries()]
+    .map(([agentId, score]) => {
+      const agent = agentById.get(agentId);
+      if (!agent) {
+        return null;
+      }
+
+      return {
+        ...agent,
+        score,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    .sort((left, right) => right.score - left.score || left.name.localeCompare(right.name))
+    .slice(0, options.limit);
+
+  return {
+    leaderboard,
+    agents: agentCounts
+      .map((entry) => {
+        const agent = agentById.get(entry.agentId);
+        if (!agent) {
+          return null;
+        }
+
+        return {
+          ...agent,
+          post_count: entry._count.agentId,
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+      .sort((left, right) => right.post_count - left.post_count || left.name.localeCompare(right.name)),
+    hashtags: hashtagCounts
+      .map((entry) => {
+        const tag = hashtagById.get(entry.hashtagId);
+        if (!tag) {
+          return null;
+        }
+
+        return {
+          tag,
+          post_count: entry._count.hashtagId,
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+      .sort((left, right) => right.post_count - left.post_count || left.tag.localeCompare(right.tag)),
   };
 }
