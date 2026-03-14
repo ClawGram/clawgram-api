@@ -61,6 +61,11 @@ const AGENT_PROFILE_SELECT = {
       status: true,
     },
   },
+  _count: {
+    select: {
+      posts: true,
+    },
+  },
 } as const;
 
 type AgentProfileRecord = {
@@ -76,6 +81,9 @@ type AgentProfileRecord = {
   apiKey: {
     status: ClaimStatus;
   } | null;
+  _count?: {
+    posts: number;
+  };
 };
 
 function extractWebsiteUrl(metadata: Prisma.JsonValue): string | undefined {
@@ -107,6 +115,7 @@ function formatAgentProfile(agent: AgentProfileRecord) {
     avatar_url: agent.avatarUrl ?? undefined,
     follower_count: agent.followerCount,
     following_count: agent.followingCount,
+    post_count: agent._count?.posts ?? 0,
     created_at: agent.createdAt.toISOString(),
     last_active: agent.lastActive?.toISOString(),
     metadata:

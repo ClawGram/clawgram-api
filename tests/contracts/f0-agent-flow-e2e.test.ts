@@ -205,6 +205,19 @@ describe('contract: F0 agent lifecycle e2e', () => {
     apiKeysById.set(record.id, record);
   };
 
+  const buildAgentProjectionRow = (agent: AgentRecord) => ({
+    ...agent,
+    apiKey:
+      [...apiKeysById.values()].find((record) => record.agentId === agent.id)
+        ? {
+            status: [...apiKeysById.values()].find((record) => record.agentId === agent.id)?.status,
+          }
+        : null,
+    _count: {
+      posts: [...postsById.values()].filter((post) => post.agentId === agent.id && post.deletedAt === null).length,
+    },
+  });
+
   const applyAgentUpdate = (where: { id: string }, data: any) => {
     const existing = agentsById.get(where.id);
     if (!existing) {
@@ -340,7 +353,7 @@ describe('contract: F0 agent lifecycle e2e', () => {
       };
       putApiKey(apiKeyRecord);
 
-      return selectProjection(agent as unknown as Record<string, unknown>, select);
+      return selectProjection(buildAgentProjectionRow(agent) as unknown as Record<string, unknown>, select);
     });
 
     prismaMocks.agentFindUnique.mockImplementation(({ where, select }: any) => {
@@ -353,12 +366,12 @@ describe('contract: F0 agent lifecycle e2e', () => {
       if (!agent) {
         return null;
       }
-      return selectProjection(agent as unknown as Record<string, unknown>, select);
+      return selectProjection(buildAgentProjectionRow(agent) as unknown as Record<string, unknown>, select);
     });
 
     prismaMocks.agentUpdate.mockImplementation(({ where, data, select }: any) => {
       const updated = applyAgentUpdate(where, data);
-      return selectProjection(updated as unknown as Record<string, unknown>, select);
+      return selectProjection(buildAgentProjectionRow(updated) as unknown as Record<string, unknown>, select);
     });
 
     prismaMocks.apiKeyFindUnique.mockImplementation(({ where, select }: any) => {
@@ -877,11 +890,12 @@ describe('contract: F0 agent lifecycle e2e', () => {
     expect(alphaProfile.statusCode).toBe(200);
     const alphaProfileBody = parseJson<{
       success: true;
-      data: { name: string; follower_count: number; following_count: number; avatar_url?: string };
+      data: { name: string; follower_count: number; following_count: number; post_count: number; avatar_url?: string };
     }>(alphaProfile.payload);
     expect(alphaProfileBody.data.name).toBe(alphaName);
     expect(alphaProfileBody.data.follower_count).toBe(1);
     expect(alphaProfileBody.data.following_count).toBe(0);
+    expect(alphaProfileBody.data.post_count).toBe(1);
     expect(alphaProfileBody.data.avatar_url).toBe(alphaAvatar.avatarUrl);
 
     const betaMe = await app.inject({
@@ -890,10 +904,11 @@ describe('contract: F0 agent lifecycle e2e', () => {
       headers: betaHeaders,
     });
     expect(betaMe.statusCode).toBe(200);
-    const betaMeBody = parseJson<{ success: true; data: { following_count: number; avatar_url?: string } }>(
+    const betaMeBody = parseJson<{ success: true; data: { following_count: number; post_count: number; avatar_url?: string } }>(
       betaMe.payload,
     );
     expect(betaMeBody.data.following_count).toBe(1);
+    expect(betaMeBody.data.post_count).toBe(0);
     expect(betaMeBody.data.avatar_url).toBeTruthy();
 
     const readPost = await app.inject({

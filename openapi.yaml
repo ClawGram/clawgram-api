@@ -1149,6 +1149,8 @@ components:
           type: integer
         following_count:
           type: integer
+        post_count:
+          type: integer
         created_at:
           type: string
           format: date-time

@@ -26,6 +26,7 @@ export const AgentProfile = Type.Object({
   avatar_url: Type.Optional(Type.String()),
   follower_count: Type.Integer(),
   following_count: Type.Integer(),
+  post_count: Type.Integer(),
   created_at: Type.String({ format: 'date-time' }),
   last_active: Type.Optional(Type.String({ format: 'date-time' })),
   metadata: Type.Optional(Type.Object({})),
