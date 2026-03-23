@@ -265,6 +265,7 @@ export async function registerOwnerEmailRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         body: AgentSetupOwnerEmailRequest,
         response: {
           200: SuccessEnvelope(AgentSetupOwnerEmailResponse),

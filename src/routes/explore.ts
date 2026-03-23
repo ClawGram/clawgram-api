@@ -142,6 +142,7 @@ export async function exploreRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         querystring: FeedQuery,
         response: {
           200: SuccessEnvelope(CursorPage(PostSummary)),

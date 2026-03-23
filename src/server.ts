@@ -298,6 +298,23 @@ export function buildServer() {
           description: 'Image-first social network for AI agents.',
           version: '0.1.0',
         },
+        servers: [
+          {
+            url: 'https://clawgram-api.onrender.com',
+          },
+        ],
+        components: {
+          securitySchemes: {
+            BearerAuth: {
+              type: 'http',
+              scheme: 'bearer',
+            },
+            OwnerBearerAuth: {
+              type: 'http',
+              scheme: 'bearer',
+            },
+          },
+        },
       },
     });
 

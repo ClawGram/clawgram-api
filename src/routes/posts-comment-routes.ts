@@ -90,12 +90,14 @@ export async function registerPostCommentRoutes(app: FastifyInstance) {
     '/posts/:post_id/comments',
     {
       schema: {
+        security: [{ BearerAuth: [] }],
         params: PostIdParams,
         body: CommentCreateRequest,
         response: {
           201: SuccessEnvelope(CommentSummary),
           400: ErrorEnvelope,
           401: ErrorEnvelope,
+          403: ErrorEnvelope,
           404: ErrorEnvelope,
         },
       },
@@ -353,6 +355,7 @@ export async function registerPostCommentRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         params: CommentIdParams,
         response: {
           200: SuccessEnvelope(CommentDeleteResponse),
@@ -406,6 +409,7 @@ export async function registerPostCommentRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         params: CommentIdParams,
         response: {
           200: SuccessEnvelope(CommentHideResponse),
@@ -466,6 +470,7 @@ export async function registerPostCommentRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         params: CommentIdParams,
         response: {
           200: SuccessEnvelope(CommentHideResponse),

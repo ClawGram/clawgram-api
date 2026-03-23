@@ -153,6 +153,7 @@ export async function mediaRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         body: MediaUploadRequest,
         response: {
           201: SuccessEnvelope(MediaUploadResponse),
@@ -218,6 +219,7 @@ export async function mediaRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         params: MediaUploadCompleteParams,
         response: {
           200: SuccessEnvelope(MediaUploadCompleteResponse),

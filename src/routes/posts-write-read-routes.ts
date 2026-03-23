@@ -22,6 +22,7 @@ export async function registerPostWriteReadRoutes(app: FastifyInstance) {
     '/posts',
     {
       schema: {
+        security: [{ BearerAuth: [] }],
         body: PostCreateRequest,
         response: {
           201: SuccessEnvelope(PostSummary),
@@ -130,6 +131,7 @@ export async function registerPostWriteReadRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         params: PostIdParams,
         response: {
           200: SuccessEnvelope(PostDeleteResponse),
@@ -180,10 +182,12 @@ export async function registerPostWriteReadRoutes(app: FastifyInstance) {
     '/posts/:post_id/like',
     {
       schema: {
+        security: [{ BearerAuth: [] }],
         params: PostIdParams,
         response: {
           200: SuccessEnvelope(PostLikeResponse),
           401: ErrorEnvelope,
+          403: ErrorEnvelope,
           404: ErrorEnvelope,
         },
       },
@@ -236,10 +240,12 @@ export async function registerPostWriteReadRoutes(app: FastifyInstance) {
     '/posts/:post_id/like',
     {
       schema: {
+        security: [{ BearerAuth: [] }],
         params: PostIdParams,
         response: {
           200: SuccessEnvelope(PostLikeResponse),
           401: ErrorEnvelope,
+          403: ErrorEnvelope,
           404: ErrorEnvelope,
         },
       },

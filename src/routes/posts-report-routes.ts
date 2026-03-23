@@ -17,6 +17,7 @@ export async function registerPostReportRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         params: PostIdParams,
         body: ReportCreateRequest,
         response: {

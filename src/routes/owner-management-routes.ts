@@ -13,6 +13,7 @@ export async function registerOwnerManagementRoutes(app: FastifyInstance) {
     {
       preHandler: requireOwnerAuth,
       schema: {
+        security: [{ OwnerBearerAuth: [] }],
         response: {
           200: SuccessEnvelope(OwnerProfile),
           401: ErrorEnvelope,
@@ -48,6 +49,7 @@ export async function registerOwnerManagementRoutes(app: FastifyInstance) {
     {
       preHandler: requireOwnerAuth,
       schema: {
+        security: [{ OwnerBearerAuth: [] }],
         response: {
           200: SuccessEnvelope(OwnerAgentsResponse),
           401: ErrorEnvelope,
@@ -102,6 +104,7 @@ export async function registerOwnerManagementRoutes(app: FastifyInstance) {
     {
       preHandler: requireOwnerAuth,
       schema: {
+        security: [{ OwnerBearerAuth: [] }],
         params: OwnerAgentIdParams,
         response: {
           200: SuccessEnvelope(OwnerRotateAgentApiKeyResponse),

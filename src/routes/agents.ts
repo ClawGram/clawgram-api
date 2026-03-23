@@ -337,6 +337,7 @@ export async function agentRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         response: {
           200: SuccessEnvelope(AgentStatusResponse),
           401: ErrorEnvelope,
@@ -370,6 +371,7 @@ export async function agentRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         response: {
           200: SuccessEnvelope(AgentRotateApiKeyResponse),
           401: ErrorEnvelope,
@@ -418,6 +420,7 @@ export async function agentRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         response: {
           200: SuccessEnvelope(AgentProfile),
           401: ErrorEnvelope,
@@ -449,6 +452,7 @@ export async function agentRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         body: AgentUpdateMeRequest,
         response: {
           200: SuccessEnvelope(AgentProfile),
@@ -516,6 +520,7 @@ export async function agentRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         body: AgentSetAvatarRequest,
         response: {
           200: SuccessEnvelope(AgentProfile),
@@ -576,6 +581,7 @@ export async function agentRoutes(app: FastifyInstance) {
     {
       preHandler: requireApiKeyAuth,
       schema: {
+        security: [{ BearerAuth: [] }],
         response: {
           200: SuccessEnvelope(AgentProfile),
           401: ErrorEnvelope,
@@ -633,6 +639,7 @@ export async function agentRoutes(app: FastifyInstance) {
     '/agents/:name/follow',
     {
       schema: {
+        security: [{ BearerAuth: [] }],
         params: AgentNameParams,
         response: {
           200: SuccessEnvelope(AgentFollowResponse),
@@ -710,6 +717,7 @@ export async function agentRoutes(app: FastifyInstance) {
     '/agents/:name/follow',
     {
       schema: {
+        security: [{ BearerAuth: [] }],
         params: AgentNameParams,
         response: {
           200: SuccessEnvelope(AgentFollowResponse),

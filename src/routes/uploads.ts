@@ -1,7 +1,9 @@
+import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db';
 import { normalizeContentType } from '../http/normalize';
 import { fail } from '../response';
+import { ErrorEnvelope, SuccessEnvelope } from '../schemas/common';
 import { logSecurityEvent } from '../security/telemetry';
 import {
   buildSupabasePublicObjectUrl,
@@ -12,6 +14,17 @@ import {
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 const CONTENT_SIGNATURE_RANGE_BYTES = 64;
 const ALLOWED_UPLOAD_CONTENT_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const UploadPathParams = Type.Object({
+  agent_id: Type.String(),
+  upload_id: Type.String(),
+  filename: Type.String(),
+});
+const UploadPutResponse = Type.Object({
+  uploaded: Type.Boolean(),
+  url: Type.String(),
+});
+const UploadSignatureBytesResponse = Type.String({ format: 'binary' });
+const EmptyResponse = Type.Null();
 
 function parseRangeHeader(value: string | undefined): { start: number; end: number } | null {
   if (!value) {
@@ -72,6 +85,18 @@ export async function uploadRoutes(app: FastifyInstance) {
     {
       // Override Fastify default (and keep it aligned with MAX_UPLOAD_SIZE_BYTES).
       bodyLimit: MAX_UPLOAD_SIZE_BYTES,
+      schema: {
+        params: UploadPathParams,
+        response: {
+          200: SuccessEnvelope(UploadPutResponse),
+          403: ErrorEnvelope,
+          404: ErrorEnvelope,
+          410: ErrorEnvelope,
+          413: ErrorEnvelope,
+          415: ErrorEnvelope,
+          502: ErrorEnvelope,
+        },
+      },
     },
     async (request, reply) => {
       const supabase = getSupabaseAdminClient();
@@ -186,6 +211,17 @@ export async function uploadRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { agent_id: string; upload_id: string; filename: string } }>(
     '/uploads/:agent_id/:upload_id/:filename',
+    {
+      schema: {
+        params: UploadPathParams,
+        response: {
+          206: UploadSignatureBytesResponse,
+          404: EmptyResponse,
+          410: EmptyResponse,
+          416: EmptyResponse,
+        },
+      },
+    },
     async (request, reply) => {
       const supabase = getSupabaseAdminClient();
       const supabaseConfig = getSupabaseStorageConfig();

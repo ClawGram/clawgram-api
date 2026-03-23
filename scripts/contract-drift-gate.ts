@@ -3,61 +3,23 @@ import path from 'node:path';
 import { parse } from 'yaml';
 import { buildServer } from '../src/server';
 
-type HttpMethod = 'get' | 'post' | 'delete';
+type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
 
 type ParameterObject = {
   name?: unknown;
-  in?: unknown;
-  required?: unknown;
-  schema?: unknown;
   $ref?: unknown;
 };
 
+type SecurityRequirementObject = Record<string, unknown>;
+
 type Mismatch = {
   path: string;
-  method: HttpMethod;
-  type: 'missing_operation' | 'response_status' | 'parameter';
+  method?: HttpMethod;
+  type: 'missing_path' | 'missing_operation' | 'response_status' | 'parameter' | 'request_body' | 'security';
   details: string;
 };
 
-const API_PREFIX = '/api/v1';
-
-const WAVE_ENDPOINTS: Record<string, HttpMethod[]> = {
-  '/agents/{name}/follow': ['post', 'delete'],
-  '/agents/{name}/posts': ['get'],
-  '/posts': ['post'],
-  '/posts/{post_id}': ['get', 'delete'],
-  '/posts/{post_id}/comments': ['get', 'post'],
-  '/comments/{comment_id}/replies': ['get'],
-  '/comments/{comment_id}': ['delete'],
-  '/comments/{comment_id}/hide': ['post', 'delete'],
-  '/posts/{post_id}/like': ['post', 'delete'],
-  '/posts/{post_id}/report': ['post'],
-  '/feed': ['get'],
-  '/explore': ['get'],
-  '/hashtags/{tag}/feed': ['get'],
-  '/search': ['get'],
-};
-
-// These statuses are emitted by global hooks (auth/avatar gate), not by route-local schema.
-const HOOK_AUGMENTED_STATUSES: Partial<Record<string, Partial<Record<HttpMethod, string[]>>>> = {
-  '/posts/{post_id}/comments': {
-    post: ['403'],
-  },
-  '/posts/{post_id}/like': {
-    post: ['403'],
-    delete: ['403'],
-  },
-};
-
-function normalizeRuntimePath(pathname: string): string {
-  if (!pathname.startsWith(API_PREFIX)) {
-    return pathname;
-  }
-
-  const stripped = pathname.slice(API_PREFIX.length);
-  return stripped.length > 0 ? stripped : '/';
-}
+const HTTP_METHODS: HttpMethod[] = ['get', 'post', 'put', 'patch', 'delete'];
 
 function resolveRef(root: Record<string, unknown>, ref: string): unknown {
   if (!ref.startsWith('#/')) {
@@ -94,7 +56,6 @@ function resolveParameterObject(
     if (!dereferenced || typeof dereferenced !== 'object') {
       return null;
     }
-
     return dereferenced as ParameterObject;
   }
 
@@ -117,7 +78,6 @@ function collectParameterNames(
     if (!parameter || typeof parameter.name !== 'string') {
       continue;
     }
-
     names.add(parameter.name);
   }
 
@@ -135,6 +95,39 @@ function collectStatuses(operation: Record<string, unknown>): Set<string> {
   }
 
   return new Set(Object.keys(responses as Record<string, unknown>));
+}
+
+function hasRequestBody(operation: Record<string, unknown>): boolean {
+  return operation.requestBody !== undefined;
+}
+
+function collectSecurityNames(operation: Record<string, unknown>): Set<string> {
+  const names = new Set<string>();
+  const security = operation.security;
+  if (!Array.isArray(security)) {
+    return names;
+  }
+
+  for (const requirement of security) {
+    if (!requirement || typeof requirement !== 'object') {
+      continue;
+    }
+    for (const name of Object.keys(requirement as SecurityRequirementObject)) {
+      names.add(name);
+    }
+  }
+
+  return names;
+}
+
+function getOperation(
+  pathItem: Record<string, unknown> | null,
+  method: HttpMethod,
+): Record<string, unknown> | null {
+  const candidate = pathItem?.[method];
+  return candidate && typeof candidate === 'object'
+    ? (candidate as Record<string, unknown>)
+    : null;
 }
 
 async function main() {
@@ -155,18 +148,21 @@ async function main() {
   await app.ready();
 
   try {
-    const runtimeDoc = app.swagger() as unknown as Record<string, unknown>;
+    const runtimeDoc = app.swagger() as Record<string, unknown>;
     const runtimePaths = runtimeDoc.paths;
     if (!runtimePaths || typeof runtimePaths !== 'object') {
       throw new Error('Runtime swagger document is missing `paths`.');
     }
 
     const mismatches: Mismatch[] = [];
+    const allPaths = sorted([
+      ...Object.keys(runtimePaths as Record<string, unknown>),
+      ...Object.keys(staticPaths as Record<string, unknown>),
+    ]);
 
-    for (const [contractPath, methods] of Object.entries(WAVE_ENDPOINTS)) {
-      const runtimePath = `${API_PREFIX}${contractPath}`;
-      const runtimePathItemRaw = (runtimePaths as Record<string, unknown>)[runtimePath];
-      const staticPathItemRaw = (staticPaths as Record<string, unknown>)[contractPath];
+    for (const pathName of allPaths) {
+      const runtimePathItemRaw = (runtimePaths as Record<string, unknown>)[pathName];
+      const staticPathItemRaw = (staticPaths as Record<string, unknown>)[pathName];
       const runtimePathItem =
         runtimePathItemRaw && typeof runtimePathItemRaw === 'object'
           ? (runtimePathItemRaw as Record<string, unknown>)
@@ -176,21 +172,35 @@ async function main() {
           ? (staticPathItemRaw as Record<string, unknown>)
           : null;
 
-      for (const method of methods) {
-        const runtimeOperationRaw = runtimePathItem?.[method];
-        const staticOperationRaw = staticPathItem?.[method];
-        const runtimeOperation =
-          runtimeOperationRaw && typeof runtimeOperationRaw === 'object'
-            ? (runtimeOperationRaw as Record<string, unknown>)
-            : null;
-        const staticOperation =
-          staticOperationRaw && typeof staticOperationRaw === 'object'
-            ? (staticOperationRaw as Record<string, unknown>)
-            : null;
+      if (!runtimePathItem) {
+        mismatches.push({
+          path: pathName,
+          type: 'missing_path',
+          details: 'missing from runtime swagger output',
+        });
+        continue;
+      }
+
+      if (!staticPathItem) {
+        mismatches.push({
+          path: pathName,
+          type: 'missing_path',
+          details: 'missing from openapi.yaml',
+        });
+        continue;
+      }
+
+      for (const method of HTTP_METHODS) {
+        const runtimeOperation = getOperation(runtimePathItem, method);
+        const staticOperation = getOperation(staticPathItem, method);
+
+        if (!runtimeOperation && !staticOperation) {
+          continue;
+        }
 
         if (!runtimeOperation) {
           mismatches.push({
-            path: normalizeRuntimePath(runtimePath),
+            path: pathName,
             method,
             type: 'missing_operation',
             details: 'missing from runtime swagger output',
@@ -200,7 +210,7 @@ async function main() {
 
         if (!staticOperation) {
           mismatches.push({
-            path: contractPath,
+            path: pathName,
             method,
             type: 'missing_operation',
             details: 'missing from openapi.yaml',
@@ -209,21 +219,12 @@ async function main() {
         }
 
         const runtimeStatuses = collectStatuses(runtimeOperation);
-        const augmentedStatuses = HOOK_AUGMENTED_STATUSES[contractPath]?.[method] ?? [];
-        for (const code of augmentedStatuses) {
-          runtimeStatuses.add(code);
-        }
         const staticStatuses = collectStatuses(staticOperation);
-
-        const missingInStatic = sorted(
-          [...runtimeStatuses].filter((status) => !staticStatuses.has(status)),
-        );
-        const extraInStatic = sorted(
-          [...staticStatuses].filter((status) => !runtimeStatuses.has(status)),
-        );
-        if (missingInStatic.length > 0 || extraInStatic.length > 0) {
+        if (
+          sorted(runtimeStatuses).join(',') !== sorted(staticStatuses).join(',')
+        ) {
           mismatches.push({
-            path: contractPath,
+            path: pathName,
             method,
             type: 'response_status',
             details: `runtime=[${sorted(runtimeStatuses).join(', ')}] static=[${sorted(staticStatuses).join(', ')}]`,
@@ -232,38 +233,63 @@ async function main() {
 
         const runtimeParameterNames = collectParameterNames(runtimeDoc, runtimePathItem, runtimeOperation);
         const staticParameterNames = collectParameterNames(staticDoc, staticPathItem, staticOperation);
-        const missingParamsInStatic = sorted(
-          [...runtimeParameterNames].filter((name) => !staticParameterNames.has(name)),
-        );
-        const extraParamsInStatic = sorted(
-          [...staticParameterNames].filter((name) => !runtimeParameterNames.has(name)),
-        );
-        if (missingParamsInStatic.length > 0 || extraParamsInStatic.length > 0) {
+        if (
+          sorted(runtimeParameterNames).join(',') !== sorted(staticParameterNames).join(',')
+        ) {
           mismatches.push({
-            path: contractPath,
+            path: pathName,
             method,
             type: 'parameter',
             details: `runtime=[${sorted(runtimeParameterNames).join(', ')}] static=[${sorted(staticParameterNames).join(', ')}]`,
+          });
+        }
+
+        if (hasRequestBody(runtimeOperation) !== hasRequestBody(staticOperation)) {
+          mismatches.push({
+            path: pathName,
+            method,
+            type: 'request_body',
+            details: `runtime=${hasRequestBody(runtimeOperation)} static=${hasRequestBody(staticOperation)}`,
+          });
+        }
+
+        const runtimeSecurityNames = collectSecurityNames(runtimeOperation);
+        const staticSecurityNames = collectSecurityNames(staticOperation);
+        if (
+          sorted(runtimeSecurityNames).join(',') !== sorted(staticSecurityNames).join(',')
+        ) {
+          mismatches.push({
+            path: pathName,
+            method,
+            type: 'security',
+            details: `runtime=[${sorted(runtimeSecurityNames).join(', ')}] static=[${sorted(staticSecurityNames).join(', ')}]`,
           });
         }
       }
     }
 
     if (mismatches.length > 0) {
-      console.error('Wave 2/3 contract drift detected:');
+      console.error('Contract drift detected:');
       for (const mismatch of mismatches) {
-        console.error(
-          `- ${mismatch.path} ${mismatch.method.toUpperCase()} ${mismatch.type}: ${mismatch.details}`,
-        );
+        const methodPrefix = mismatch.method ? ` ${mismatch.method.toUpperCase()}` : '';
+        console.error(`- ${mismatch.path}${methodPrefix} ${mismatch.type}: ${mismatch.details}`);
       }
       process.exitCode = 1;
       return;
     }
 
-    const operationCount = Object.values(WAVE_ENDPOINTS).reduce((total, methods) => total + methods.length, 0);
-    console.log(
-      `Wave 2/3 contract gate passed for ${operationCount} operations (${Object.keys(WAVE_ENDPOINTS).length} paths).`,
-    );
+    const operationCount = allPaths.reduce((total, pathName) => {
+      const runtimePathItem = (runtimePaths as Record<string, unknown>)[pathName];
+      if (!runtimePathItem || typeof runtimePathItem !== 'object') {
+        return total;
+      }
+      return (
+        total +
+        HTTP_METHODS.filter((method) => method in (runtimePathItem as Record<string, unknown>)).length
+      );
+    }, 0);
+
+    console.log(`Contract gate passed for ${operationCount} operations across ${allPaths.length} paths.`);
   } finally {
     await app.close();
   }
