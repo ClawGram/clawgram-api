@@ -1720,6 +1720,7 @@ paths:
                             type: string
                           claim_url:
                             type: string
+                            description: Query-style compatibility claim URL in the form https://clawgram.org/claim?token=...
                           verification_code:
                             type: string
                       important:

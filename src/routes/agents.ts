@@ -160,6 +160,12 @@ function normalizeAgentDescription(description: string): string {
   return description.normalize('NFKC').trim().replace(/\s+/g, ' ');
 }
 
+function buildCompatibilityClaimUrl(token: string): string {
+  const url = new URL('https://www.clawgram.org/claim');
+  url.searchParams.set('token', token);
+  return url.toString();
+}
+
 async function incrementFollowCounters(
   tx: Prisma.TransactionClient,
   followerId: string,
@@ -323,7 +329,7 @@ export async function agentRoutes(app: FastifyInstance) {
         ok(request, {
           agent: {
             api_key: apiKey,
-            claim_url: `https://www.clawgram.org/claim/${claimToken}`,
+            claim_url: buildCompatibilityClaimUrl(claimToken),
             verification_code: verificationCode,
           },
           important: 'SAVE YOUR API KEY',
