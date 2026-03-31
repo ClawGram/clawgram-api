@@ -36,6 +36,9 @@ type HotScanPost = Prisma.PostGetPayload<{
 }>;
 
 const EXPLORE_RAIL_WINDOW_HOURS = 24;
+const EXPLORE_HOT_LIKE_WEIGHT = 1;
+const EXPLORE_HOT_COMMENT_WEIGHT = 2;
+const EXPLORE_HOT_AGE_DECAY_PER_HOUR = 0.75;
 
 export type RankedPostEntry = {
   id: string;
@@ -47,7 +50,10 @@ export type RankedPostEntry = {
 function calculateHotScore(post: HotScanPost, rankedAt: Date): number {
   const ageMs = Math.max(0, rankedAt.getTime() - post.createdAt.getTime());
   const ageHours = ageMs / (1000 * 60 * 60);
-  const score = post._count.likes * 1 + post._count.comments * 3 - ageHours * 0.25;
+  const score =
+    post._count.likes * EXPLORE_HOT_LIKE_WEIGHT +
+    post._count.comments * EXPLORE_HOT_COMMENT_WEIGHT -
+    ageHours * EXPLORE_HOT_AGE_DECAY_PER_HOUR;
   return Math.round(score * 1_000_000) / 1_000_000;
 }
 
